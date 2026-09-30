@@ -1,5 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Toolbar } from './Toolbar';
+import React, { useEffect, useRef, useState } from 'react';
 import { HighlightLayer } from './HighlightLayer';
 import { BlockInspectorOverlay } from './BlockInspectorOverlay';
 import { PageLayoutData, PDFBlock, BoundingBox } from '../../types/pdf';
@@ -7,6 +6,7 @@ import { pdfService } from '../../services/pdfService';
 import { Loader2 } from 'lucide-react';
 
 interface PDFViewerProps {
+  fileName: string;
   currentPage: number;
   numPages: number;
   currentPageLayout: PageLayoutData | null;
@@ -14,14 +14,11 @@ interface PDFViewerProps {
   activeHighlight: BoundingBox | null;
   inspectorMode: boolean;
   scale: number;
-  readCodeLiterally: boolean;
-  onScaleChange: (scale: number) => void;
-  onPageChange: (page: number) => void;
   onSelectBlock: (block: PDFBlock) => void;
-  onToggleCodeLiterally: () => void;
 }
 
 export const PDFViewer: React.FC<PDFViewerProps> = ({
+  fileName,
   currentPage,
   numPages,
   currentPageLayout,
@@ -29,11 +26,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
   activeHighlight,
   inspectorMode,
   scale,
-  readCodeLiterally,
-  onScaleChange,
-  onPageChange,
   onSelectBlock,
-  onToggleCodeLiterally,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -72,54 +65,16 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
     };
   }, [currentPage, scale, numPages]);
 
-  // Fit Width handler
-  const handleFitWidth = useCallback(() => {
-    if (!scrollContainerRef.current || !currentPageLayout) return;
-    const containerWidth = scrollContainerRef.current.clientWidth - 48; // padding
-    const pageWidth = currentPageLayout.width || 595;
-    const newScale = Math.max(0.4, Math.min(2.5, containerWidth / pageWidth));
-    onScaleChange(Math.round(newScale * 100) / 100);
-  }, [currentPageLayout, onScaleChange]);
-
-  // Fit Page handler
-  const handleFitPage = useCallback(() => {
-    if (!scrollContainerRef.current || !currentPageLayout) return;
-    const containerWidth = scrollContainerRef.current.clientWidth - 48;
-    const containerHeight = scrollContainerRef.current.clientHeight - 48;
-    const pageWidth = currentPageLayout.width || 595;
-    const pageHeight = currentPageLayout.height || 842;
-    const scaleW = containerWidth / pageWidth;
-    const scaleH = containerHeight / pageHeight;
-    const newScale = Math.max(0.4, Math.min(2.5, Math.min(scaleW, scaleH)));
-    onScaleChange(Math.round(newScale * 100) / 100);
-  }, [currentPageLayout, onScaleChange]);
-
-  const isCodeActive = activeBlock?.type === 'code';
-
   return (
-    <div className="flex-1 flex flex-col h-full bg-slate-900 overflow-hidden relative">
-      {/* Top Toolbar */}
-      <Toolbar
-        currentPage={currentPage}
-        numPages={numPages}
-        scale={scale}
-        onPageChange={onPageChange}
-        onScaleChange={onScaleChange}
-        onFitWidth={handleFitWidth}
-        onFitPage={handleFitPage}
-        isCodeActive={isCodeActive}
-        readCodeLiterally={readCodeLiterally}
-        onToggleCodeLiterally={onToggleCodeLiterally}
-      />
-
-      {/* Main PDF Scroll Viewport */}
+    <div className="flex-1 h-full bg-zinc-950 overflow-hidden relative">
+      {/* 100% Full-Height Unobstructed PDF Scroll Viewport */}
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-auto p-6 flex justify-center items-start bg-slate-950 relative"
+        className="h-full w-full overflow-auto py-8 px-6 flex justify-center items-start relative select-none"
       >
-        <div className="relative shadow-2xl rounded-sm border border-slate-700/60 bg-white">
+        <div className="relative shadow-2xl rounded-sm border border-zinc-800/80 bg-white">
           {/* Canvas Rendering the Original PDF Page */}
-          <canvas ref={canvasRef} className="block shadow-md rounded-sm" />
+          <canvas ref={canvasRef} className="block shadow-xl rounded-sm" />
 
           {/* Synchronized Highlighting Layer */}
           <HighlightLayer
@@ -145,11 +100,18 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
 
         {/* Loading Spinner */}
         {isRendering && (
-          <div className="absolute top-8 right-8 bg-slate-900/80 backdrop-blur border border-slate-700 px-3 py-1.5 rounded-full flex items-center space-x-2 text-xs text-sky-400 shadow-lg">
+          <div className="absolute top-6 right-6 bg-zinc-900/90 backdrop-blur border border-zinc-800 px-3 py-1.5 rounded-full flex items-center space-x-2 text-xs text-amber-400 shadow-xl z-20">
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            <span>Rendering PDF...</span>
+            <span>Rendering page...</span>
           </div>
         )}
+      </div>
+
+      {/* Unobtrusive Document Title Badge (Bottom-Right Link Hover Style) */}
+      <div className="absolute bottom-3 right-4 px-2.5 py-1 rounded bg-zinc-900/80 backdrop-blur-md border border-zinc-800 text-[11px] text-zinc-400 select-none pointer-events-none tracking-wide z-20 shadow-md flex items-center space-x-2">
+        <span className="truncate max-w-[280px] font-medium text-zinc-300">{fileName}</span>
+        <span className="text-zinc-600">•</span>
+        <span className="font-mono text-zinc-400">Page {currentPage} of {numPages}</span>
       </div>
     </div>
   );

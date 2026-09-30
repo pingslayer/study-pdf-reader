@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { PDFViewer } from './components/PDFViewer/PDFViewer';
-import { PlaybackBar } from './components/Controls/PlaybackBar';
 import { StudySettingsModal } from './components/Controls/StudySettingsModal';
 import { ApiKeyModal } from './components/Controls/ApiKeyModal';
 import { PageLayoutData, PDFBlock, StudySettings, BoundingBox } from './types/pdf';
@@ -414,6 +412,21 @@ export const App: React.FC = () => {
     }));
   };
 
+  // Fit Width & Fit Page scale calculations
+  const handleFitWidth = useCallback(() => {
+    if (!currentPageLayout) return;
+    const availableWidth = window.innerWidth - (sidebarOpen ? 320 : 56) - 64;
+    const pageWidth = currentPageLayout.width || 595;
+    setScale(Math.round(Math.max(0.4, Math.min(2.5, availableWidth / pageWidth)) * 100) / 100);
+  }, [currentPageLayout, sidebarOpen]);
+
+  const handleFitPage = useCallback(() => {
+    if (!currentPageLayout) return;
+    const availableHeight = window.innerHeight - 64;
+    const pageHeight = currentPageLayout.height || 842;
+    setScale(Math.round(Math.max(0.4, Math.min(2.5, availableHeight / pageHeight)) * 100) / 100);
+  }, [currentPageLayout]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -432,6 +445,8 @@ export const App: React.FC = () => {
       } else if (e.code === 'ArrowRight') {
         e.preventDefault();
         handlePageChange(currentPage + 1);
+      } else if (e.key === 'i' || e.key === 'I') {
+        setInspectorMode((prev) => !prev);
       }
     };
 
@@ -445,64 +460,14 @@ export const App: React.FC = () => {
     : -1;
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
-      {/* Top Header */}
-      <Header
-        fileName={fileName}
-        inspectorMode={inspectorMode}
-        onToggleInspector={() => setInspectorMode(!inspectorMode)}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onOpenApiKeyModal={() => setApiKeyModalOpen(true)}
+    <div className="flex h-screen w-screen bg-zinc-950 text-zinc-100 overflow-hidden font-sans">
+      {/* Unified All-in-One Control Sidebar */}
+      <Sidebar
         onFileUpload={handleFileUpload}
         onLoadSample={handleLoadSample}
+        onOpenSettings={() => setSettingsOpen(true)}
         isBackendConnected={isBackendConnected}
-        hasElevenLabsKey={hasElevenLabsKey}
         activeProvider={activeProvider}
-      />
-
-      {/* Main Workspace Area (Sidebar + PDF Viewer) */}
-      <div className="flex-1 flex overflow-hidden relative">
-        <Sidebar
-          numPages={numPages}
-          currentPage={currentPage}
-          currentPageLayout={currentPageLayout}
-          activeBlockId={activeBlock?.id || null}
-          onSelectPage={handlePageChange}
-          onSelectBlock={(b) => {
-            if (isPlaying) {
-              playBlockNarration(b);
-            } else {
-              handleSelectBlock(b);
-            }
-          }}
-          isOpen={sidebarOpen}
-          onToggleOpen={() => setSidebarOpen(!sidebarOpen)}
-        />
-
-        <PDFViewer
-          currentPage={currentPage}
-          numPages={numPages}
-          currentPageLayout={currentPageLayout}
-          activeBlock={activeBlock}
-          activeHighlight={activeHighlight}
-          inspectorMode={inspectorMode}
-          scale={scale}
-          readCodeLiterally={studySettings.readCodeLiterally}
-          onScaleChange={setScale}
-          onPageChange={handlePageChange}
-          onSelectBlock={(b) => {
-            if (isPlaying) {
-              playBlockNarration(b);
-            } else {
-              handleSelectBlock(b);
-            }
-          }}
-          onToggleCodeLiterally={handleToggleCodeLiterally}
-        />
-      </div>
-
-      {/* Bottom Playback & Progress Bar */}
-      <PlaybackBar
         isPlaying={isPlaying}
         speed={speed}
         volume={volume}
@@ -516,11 +481,47 @@ export const App: React.FC = () => {
         onStop={handleStop}
         onPrevBlock={handlePrevBlock}
         onNextBlock={handleNextBlock}
-        onPrevPage={() => handlePageChange(currentPage - 1)}
-        onNextPage={() => handlePageChange(currentPage + 1)}
         onSpeedChange={handleSpeedChange}
         onVoiceChange={setSelectedVoice}
         onVolumeChange={handleVolumeChange}
+        numPages={numPages}
+        currentPage={currentPage}
+        scale={scale}
+        onSelectPage={handlePageChange}
+        onScaleChange={setScale}
+        onFitWidth={handleFitWidth}
+        onFitPage={handleFitPage}
+        currentPageLayout={currentPageLayout}
+        onSelectBlock={(b) => {
+          if (isPlaying) {
+            playBlockNarration(b);
+          } else {
+            handleSelectBlock(b);
+          }
+        }}
+        readCodeLiterally={studySettings.readCodeLiterally}
+        onToggleCodeLiterally={handleToggleCodeLiterally}
+        isOpen={sidebarOpen}
+        onToggleOpen={() => setSidebarOpen(!sidebarOpen)}
+      />
+
+      {/* 100% Vertical Height Unobstructed PDF Viewport */}
+      <PDFViewer
+        fileName={fileName}
+        currentPage={currentPage}
+        numPages={numPages}
+        currentPageLayout={currentPageLayout}
+        activeBlock={activeBlock}
+        activeHighlight={activeHighlight}
+        inspectorMode={inspectorMode}
+        scale={scale}
+        onSelectBlock={(b) => {
+          if (isPlaying) {
+            playBlockNarration(b);
+          } else {
+            handleSelectBlock(b);
+          }
+        }}
       />
 
       {/* Study Settings Modal */}
