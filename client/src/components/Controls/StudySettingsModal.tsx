@@ -32,15 +32,15 @@ export const StudySettingsModal: React.FC<StudySettingsModalProps> = ({
   }> = [
     {
       key: 'skipCodeBlocks',
-      title: 'Skip code listings & syntax',
-      description: 'Bypasses C, Python, and shell program listings so audio narration maintains continuous conceptual flow (like Coursera).',
-      recommended: true,
+      title: 'Auto-skip code listings',
+      description: 'Automatically skips code listings. When off, code is read and you can manually skip anytime by clicking the next block or pressing Next.',
+      recommended: false,
     },
     {
       key: 'skipDiagrams',
-      title: 'Skip diagram labels & illustrations',
-      description: 'Ignores floating flowchart text, arrows, and vector diagram labels.',
-      recommended: true,
+      title: 'Auto-skip diagram text labels',
+      description: 'Skips floating diagram labels and arrows. (Non-textual images are always skipped automatically).',
+      recommended: false,
     },
     {
       key: 'skipHeadersFooters',

@@ -1,4 +1,5 @@
 import { PDFBlock, BoundingBox } from '../types/pdf';
+import { WordAlignment } from './ttsClient';
 
 export interface VisualToken {
   word: string;
@@ -12,9 +13,10 @@ export interface VisualToken {
 
 export function normalizeWord(word: string): string {
   return word
+    .normalize('NFKD')
     .toLowerCase()
-    .replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, '') // Strip leading/trailing punctuation
     .replace(/[–—]/g, '-')
+    .replace(/^[^\p{L}\p{N}&]+|[^\p{L}\p{N}&]+$/gu, '') // Strip leading/trailing punctuation except &
     .trim();
 }
 
@@ -136,22 +138,32 @@ export function buildVisualTokensFromBlock(block: PDFBlock): VisualToken[] {
 
       if (!mt.isSpace && mt.text.trim().length > 0) {
         const wordText = mt.text.trim();
-        const box: BoundingBox = {
-          x: Math.round(currentX * 10) / 10,
-          y: Math.round(item.y * 10) / 10,
-          width: Math.max(6, Math.round(scaledWidth * 10) / 10),
-          height: Math.round(item.height * 10) / 10,
-        };
 
-        tokens.push({
-          word: wordText,
-          normalized: normalizeWord(wordText),   // strips trailing '-' for matching
-          itemIndices: [i],
-          charStart: runningCharOffset,
-          charEnd: runningCharOffset + wordText.length,
-          bbox: box,
-          subBoxes: [box],
-        });
+        // Edge TTS and speech synthesizers emit WordBoundary events ONLY for spoken
+        // lexical items (letters, digits, and spoken symbols like '&').
+        // Pure punctuation tokens (e.g. standalone '—', '.', ',', '•') never produce
+        // a WordBoundary event. We must advance character offsets and canvas X coordinates,
+        // but skip registering phantom visual tokens so the token list matches TTS 1:1.
+        const isSpoken = /[\p{L}\p{N}&]/u.test(wordText);
+
+        if (isSpoken) {
+          const box: BoundingBox = {
+            x: Math.round(currentX * 10) / 10,
+            y: Math.round(item.y * 10) / 10,
+            width: Math.max(6, Math.round(scaledWidth * 10) / 10),
+            height: Math.round(item.height * 10) / 10,
+          };
+
+          tokens.push({
+            word: wordText,
+            normalized: normalizeWord(wordText),   // strips trailing '-' for matching
+            itemIndices: [i],
+            charStart: runningCharOffset,
+            charEnd: runningCharOffset + wordText.length,
+            bbox: box,
+            subBoxes: [box],
+          });
+        }
 
         runningCharOffset += wordText.length;
       } else {
@@ -164,6 +176,103 @@ export function buildVisualTokensFromBlock(block: PDFBlock): VisualToken[] {
     // Account for the newline character ('\n') joined between items in block.text
     if (i < items.length - 1) {
       runningCharOffset += 1;
+    }
+  }
+
+  return tokens;
+}
+
+/**
+ * Builds visual tokens directly from the TTS alignment words.
+ *
+ * This provides 100% mathematical synchronization:
+ * Instead of predicting how speech synthesis tokenizes code or text,
+ * the TTS engine's emitted words serve as the ground truth. Each word is
+ * sequentially located in the block's text items and mapped to its exact
+ * bounding box on the PDF canvas.
+ */
+export function buildVisualTokensFromAlignment(
+  block: PDFBlock,
+  alignment: WordAlignment[]
+): VisualToken[] {
+  const items = block.items;
+  if (!items || items.length === 0 || !alignment || alignment.length === 0) {
+    return buildVisualTokensFromBlock(block);
+  }
+
+  const tokens: VisualToken[] = [];
+  let currentItemIdx = 0;
+  let charOffsetInItem = 0;
+  let runningCharOffset = 0;
+
+  for (let aIdx = 0; aIdx < alignment.length; aIdx++) {
+    const rawWord = alignment[aIdx].word;
+    // Strip surrounding punctuation for searching in PDF items (e.g. '<stdio.h>' or 'argc,')
+    const cleanWord = rawWord.replace(/^[^a-zA-Z0-9#*+<]+|[^a-zA-Z0-9#*+>]+$/gu, '');
+    const searchWord = cleanWord.length > 0 ? cleanWord : rawWord;
+
+    let matched = false;
+
+    // Search sequentially in current item and subsequent items
+    for (let i = currentItemIdx; i < items.length; i++) {
+      const item = items[i];
+      const startSearch = i === currentItemIdx ? charOffsetInItem : 0;
+      
+      const foundIdx = item.text.toLowerCase().indexOf(searchWord.toLowerCase(), startSearch);
+      if (foundIdx !== -1) {
+        const totalMeasured = getTextWidth(item.text, item.fontSize, item.isMonospace) || 1;
+        const scaleFactor = item.width / totalMeasured;
+
+        const prefix = item.text.slice(0, foundIdx);
+        const prefixWidth = getTextWidth(prefix, item.fontSize, item.isMonospace) * scaleFactor;
+        const matchedSlice = item.text.slice(foundIdx, foundIdx + searchWord.length);
+        const wordWidth = Math.max(6, getTextWidth(matchedSlice, item.fontSize, item.isMonospace) * scaleFactor);
+
+        const box: BoundingBox = {
+          x: Math.round((item.x + prefixWidth) * 10) / 10,
+          y: Math.round(item.y * 10) / 10,
+          width: Math.max(6, Math.round(wordWidth * 10) / 10),
+          height: Math.round(item.height * 10) / 10,
+        };
+
+        tokens.push({
+          word: rawWord,
+          normalized: normalizeWord(rawWord),
+          itemIndices: [i],
+          charStart: runningCharOffset,
+          charEnd: runningCharOffset + rawWord.length,
+          bbox: box,
+          subBoxes: [box],
+        });
+
+        currentItemIdx = i;
+        charOffsetInItem = foundIdx + searchWord.length;
+        runningCharOffset += rawWord.length + 1;
+        matched = true;
+        break;
+      }
+    }
+
+    if (!matched) {
+      // Fallback: attach to current item coordinate
+      const item = items[Math.min(currentItemIdx, items.length - 1)];
+      const box: BoundingBox = {
+        x: Math.round(item.x * 10) / 10,
+        y: Math.round(item.y * 10) / 10,
+        width: Math.max(6, Math.round(item.width * 10) / 10),
+        height: Math.round(item.height * 10) / 10,
+      };
+
+      tokens.push({
+        word: rawWord,
+        normalized: normalizeWord(rawWord),
+        itemIndices: [Math.min(currentItemIdx, items.length - 1)],
+        charStart: runningCharOffset,
+        charEnd: runningCharOffset + rawWord.length,
+        bbox: box,
+        subBoxes: [box],
+      });
+      runningCharOffset += rawWord.length + 1;
     }
   }
 
@@ -216,14 +325,6 @@ export function findMatchingVisualToken(
     const searchEnd = Math.min(visualTokens.length, anchor + 8);
 
     for (let idx = searchStart; idx < searchEnd; idx++) {
-      const vt = visualTokens[idx];
-      if (charIndex >= vt.charStart - 1 && charIndex <= vt.charEnd + 2) {
-        return { token: vt, index: idx };
-      }
-    }
-
-    // Full scan fallback for charIndex
-    for (let idx = 0; idx < visualTokens.length; idx++) {
       const vt = visualTokens[idx];
       if (charIndex >= vt.charStart - 1 && charIndex <= vt.charEnd + 2) {
         return { token: vt, index: idx };

@@ -151,7 +151,7 @@ function groupItemsIntoLines(items: ExtractedTextItem[]): Line[] {
       // Determine if a space is needed between previous item and this item
       const lastItem = line.items[line.items.length - 1];
       const gap = item.x - (lastItem.x + lastItem.width);
-      const space = gap > 2 ? ' ' : '';
+      const space = gap > 0.8 || lastItem.text.endsWith(' ') || item.text.startsWith(' ') ? ' ' : '';
       
       line.items.push(item);
       line.text += space + item.text;
@@ -161,7 +161,6 @@ function groupItemsIntoLines(items: ExtractedTextItem[]): Line[] {
       line.width = maxX - minX;
       line.height = Math.max(line.height, item.height);
       line.fontSize = Math.max(line.fontSize, item.fontSize);
-      if (item.isMonospace) line.isMonospace = true;
     } else {
       lines.push({
         items: [item],
@@ -171,7 +170,7 @@ function groupItemsIntoLines(items: ExtractedTextItem[]): Line[] {
         width: item.width,
         height: item.height,
         fontSize: item.fontSize,
-        isMonospace: item.isMonospace,
+        isMonospace: false,
       });
     }
   }
@@ -179,6 +178,21 @@ function groupItemsIntoLines(items: ExtractedTextItem[]): Line[] {
   // Ensure items within each line are sorted left to right
   for (const line of lines) {
     line.items.sort((a, b) => a.x - b.x);
+  }
+
+  // Calculate line.isMonospace: true if monospace characters represent >= 45% of total characters,
+  // or if the line has explicit code syntax keywords, preventing inline code words (e.g. Spin() or cpu.c)
+  // in normal English sentences from toggling the entire line into code.
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const monoChars = line.items.reduce((s, it) => s + (it.isMonospace ? it.text.length : 0), 0);
+    const totalChars = line.items.reduce((s, it) => s + it.text.length, 0) || 1;
+    const hasCodeSyntax = /^(#include|\d+\s*(#include|int|char|while|Spin|printf|return|if|\{|\}))/.test(line.text.trim());
+    line.isMonospace = (monoChars / totalChars) >= 0.45 || hasCodeSyntax;
+    // Continuation line number in code listing e.g. "6"
+    if (!line.isMonospace && i > 0 && lines[i - 1].isMonospace && /^\d+$/.test(line.text.trim())) {
+      line.isMonospace = true;
+    }
   }
 
   return lines;
@@ -219,6 +233,8 @@ function segmentLinesIntoBlocks(
     const isHeading = currLine.fontSize >= medianFontSize * 1.25 || isNumberedHeading(currLine.text);
     const isPrevHeading = prevLine.fontSize >= medianFontSize * 1.25 || isNumberedHeading(prevLine.text);
     const isLargeGap = verticalGap > Math.max(8, prevLine.fontSize * 0.9);
+    // Natural paragraph start: indented line or follows a short terminated line
+    const isParagraphBreak = (currLine.x - prevLine.x >= 8) || (currLine.x >= 66 && (prevLine.x + prevLine.width) < 335);
     const isHeaderArea = currLine.y < 50 || prevLine.y < 50;
     const isFooterArea = currLine.y > pageHeight - 55 || prevLine.y > pageHeight - 55;
     const isCaption = isCaptionText(currLine.text);
@@ -230,6 +246,7 @@ function segmentLinesIntoBlocks(
       isHeading ||
       isPrevHeading ||
       isLargeGap ||
+      isParagraphBreak ||
       isHeaderArea ||
       isFooterArea ||
       isCaption ||
@@ -361,7 +378,9 @@ function isNumberedHeading(text: string): boolean {
 }
 
 function isCaptionText(text: string): boolean {
-  return /^(Figure|Fig\.|Diagram|Table|Listing|Chart)\s+\d+/i.test(text.trim());
+  // Real captions have a caption label followed by a delimiter (colon, dash, period with title)
+  // e.g. "Figure 2.1: Simple Example...", not body sentences like "Figure 2.1 depicts our first program."
+  return /^(Figure|Fig\.|Diagram|Table|Listing|Chart)\s+\d+(\.\d+)?\s*[:\-\—]/i.test(text.trim());
 }
 
 function isEquationText(text: string): boolean {

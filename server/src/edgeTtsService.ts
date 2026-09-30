@@ -3,22 +3,18 @@ import { WordAlignment, TTSResponse } from './ttsService.js';
 
 function sanitizeForTTS(text: string): string {
   return text
-    // Clean bracketed academic citations e.g. [PP03], [BOH10], [1], [2, 3] from audio stream
-    .replace(/\[[A-Za-z0-9,\s\-–]{1,12}\]/g, '')
     // Convert math & diagram arrows to natural speech
     .replace(/->/g, ' to ')
     .replace(/<-/g, ' from ')
     .replace(/<=>/g, ' equivalent to ')
     .replace(/=>/g, ' implies ')
     .replace(/!=/g, ' not equal to ')
-    .replace(/<=/g, ' less than or equal to ')
-    .replace(/>=/g, ' greater than or equal to ')
-    .replace(/&/g, ' and ')
-    .replace(/</g, ' less than ')
-    .replace(/>/g, ' greater than ')
-    // Strip control chars and XML breaking quotes
+    // Escape XML entities for SSML parser safety without deleting text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    // Strip non-printable control chars
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ' ')
-    .replace(/["']/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -70,7 +66,11 @@ export class EdgeTTSService {
             if (raw.Metadata) {
               for (const item of raw.Metadata) {
                 if (item.Type === 'WordBoundary' && item.Data) {
-                  const word = item.Data.text.Text;
+                  let word = item.Data.text.Text;
+                  if (word === '&amp;') word = '&';
+                  else if (word === '&lt;') word = '<';
+                  else if (word === '&gt;') word = '>';
+
                   // 1 tick = 100 nanoseconds -> 10,000,000 ticks = 1 second
                   const start = item.Data.Offset / 10000000;
                   const end = (item.Data.Offset + item.Data.Duration) / 10000000;

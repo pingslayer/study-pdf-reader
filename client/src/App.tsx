@@ -8,8 +8,12 @@ import { ApiKeyModal } from './components/Controls/ApiKeyModal';
 import { PageLayoutData, PDFBlock, StudySettings, BoundingBox } from './types/pdf';
 import { pdfService } from './services/pdfService';
 import { ttsPlayer } from './services/ttsClient';
-import { buildVisualTokensFromBlock, findMatchingVisualToken, VisualToken } from './services/textMapping';
-import { convertCodeToSpokenText } from './services/codeSpokenCleaner';
+import {
+  buildVisualTokensFromBlock,
+  buildVisualTokensFromAlignment,
+  findMatchingVisualToken,
+  VisualToken,
+} from './services/textMapping';
 
 export const App: React.FC = () => {
   // Document state
@@ -38,18 +42,18 @@ export const App: React.FC = () => {
   ]);
   const [selectedVoice, setSelectedVoice] = useState('en-US-GuyNeural');
 
-  // Study Settings (defaults optimized for continuous academic prose reading)
+  // Study Settings: continuous reading without stopping (skip only running headers & page numbers)
   const [studySettings, setStudySettings] = useState<StudySettings>({
     pauseAtHeading: false,
-    pauseAtFigure: false,  // Default OFF: continuous reading across diagrams
-    pauseAtCode: false,    // Default OFF: continuous reading across code
-    skipCodeBlocks: true,  // Default ON: bypass code listings to maintain prose flow (like Coursera)
-    skipDiagrams: true,    // Default ON: bypass floating diagram labels/arrows
-    skipPageNumbers: true, // Default ON
-    skipHeadersFooters: true, // Default ON
-    readCaptions: true,    // Default ON: speak descriptive figure captions
-    readEquations: false,  // Default OFF: avoid math symbol noise
-    readCodeLiterally: false, // Default OFF
+    pauseAtFigure: false,
+    pauseAtCode: false,
+    skipCodeBlocks: false, // Reads code blocks; user can skip anytime by clicking next block
+    skipDiagrams: false,   // Reads diagram labels; skips only non-textual images
+    skipPageNumbers: true, // Skips standalone page numbers
+    skipHeadersFooters: true, // Skips running header book titles
+    readCaptions: true,
+    readEquations: true,
+    readCodeLiterally: true, // Reads code line-by-line with word highlights continuously
   });
 
   // Playback & Highlighting State
@@ -193,21 +197,34 @@ export const App: React.FC = () => {
       handleSelectBlock(block);
       setIsPlaying(true);
 
-      // 1. Prepare spoken text — join lines with spaces so the TTS engine
-      //    does not interpret PDF line-breaks as sentence boundaries (which
-      //    would create unnatural pauses mid-sentence).
-      let spokenText = block.text.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
-
+      // 1. Single Source of Truth:
+      // Derive spokenText directly from visualTokensRef.current so the word sequence
+      // fed to the TTS engine is guaranteed to be an exact 1-to-1 mirror of the highlight boxes.
+      let spokenText = '';
       if (block.type === 'code') {
         if (studySettings.readCodeLiterally) {
-          spokenText = convertCodeToSpokenText(block.text);
+          spokenText = visualTokensRef.current.length > 0
+            ? visualTokensRef.current.map((vt) => vt.word).join(' ')
+            : block.text.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
         } else {
           spokenText = 'Code example. ' + (block.languageHint ? `${block.languageHint} code.` : '');
         }
+      } else if (visualTokensRef.current.length > 0) {
+        spokenText = visualTokensRef.current.map((vt) => vt.word).join(' ');
+      } else {
+        spokenText = block.text.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
       }
 
       try {
         const ttsData = await ttsPlayer.fetchTTS(spokenText, selectedVoice);
+
+        // Ground-Truth Synchronization:
+        // Build visual tokens directly from the TTS alignment words so that the screen's
+        // token list matches the spoken audio stream with 100% mathematical precision.
+        if (ttsData.alignment && ttsData.alignment.length > 0) {
+          visualTokensRef.current = buildVisualTokensFromAlignment(block, ttsData.alignment);
+          lastMatchedTokenIndexRef.current = 0;
+        }
 
         ttsPlayer.playWithAlignment(
           ttsData,
@@ -277,6 +294,13 @@ export const App: React.FC = () => {
 
   // Play button clicked
   const handlePlay = useCallback(() => {
+    // If paused mid-sentence on active block, resume immediately from the exact word
+    if (activeBlock && ttsPlayer.canResume()) {
+      setIsPlaying(true);
+      ttsPlayer.resume();
+      return;
+    }
+
     const readable = getReadableBlocks();
     if (readable.length === 0) return;
 

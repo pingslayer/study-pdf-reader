@@ -103,6 +103,26 @@ export class TTSPlayer {
     });
   }
 
+  public canResume(): boolean {
+    return Boolean(
+      this.audioElement &&
+      this.audioElement.paused &&
+      !this.audioElement.ended &&
+      this.audioElement.currentTime > 0
+    );
+  }
+
+  public resume(): boolean {
+    if (this.canResume() && this.audioElement) {
+      this.isPlaying = true;
+      this.audioElement.play().catch((err) => {
+        console.error('Failed to resume audio playback:', err);
+      });
+      return true;
+    }
+    return false;
+  }
+
   public pause() {
     this.isPlaying = false;
     if (this.audioElement) {
