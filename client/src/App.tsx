@@ -12,6 +12,7 @@ import {
   findMatchingVisualToken,
   VisualToken,
 } from './services/textMapping';
+import { isBlockReadable, filterReadableBlocks } from './services/studySettings';
 
 export const App: React.FC = () => {
   // Document state
@@ -71,6 +72,7 @@ export const App: React.FC = () => {
   // the latest version of these functions without being re-created every render.
   const handleNextBlockRef = useRef<() => void>(() => {});
   const playBlockNarrationRef = useRef<(block: PDFBlock) => void>(() => {});
+  const isAtBlockEndRef = useRef(false);
 
   // Check backend health & voices on mount
   useEffect(() => {
@@ -162,6 +164,7 @@ export const App: React.FC = () => {
 
   // Select a block
   const handleSelectBlock = useCallback((block: PDFBlock) => {
+    isAtBlockEndRef.current = false;
     setActiveBlock(block);
     visualTokensRef.current = buildVisualTokensFromBlock(block);
     lastMatchedTokenIndexRef.current = 0;
@@ -169,25 +172,11 @@ export const App: React.FC = () => {
     setActiveHighlight(block.bbox);
   }, []);
 
-  // Helper: check if a block should be read according to current study settings
-  const isBlockReadable = useCallback(
-    (b: PDFBlock) => {
-      if (b.isFiltered && studySettings.skipHeadersFooters) return false;
-      if ((b.type === 'header' || b.type === 'footer') && studySettings.skipHeadersFooters) return false;
-      if (b.type === 'figure' && studySettings.skipDiagrams) return false;
-      if (b.type === 'code' && studySettings.skipCodeBlocks) return false;
-      if (b.type === 'caption' && !studySettings.readCaptions) return false;
-      if (b.type === 'equation' && !studySettings.readEquations) return false;
-      return true;
-    },
-    [studySettings]
-  );
-
   // Get readable blocks on current page based on study settings
   const getReadableBlocks = useCallback(() => {
     if (!currentPageLayout) return [];
-    return currentPageLayout.blocks.filter(isBlockReadable);
-  }, [currentPageLayout, isBlockReadable]);
+    return currentPageLayout.blocks.filter((b) => isBlockReadable(b, studySettings));
+  }, [currentPageLayout, studySettings]);
 
   // Play narration of a specific block
   const playBlockNarration = useCallback(
@@ -248,6 +237,7 @@ export const App: React.FC = () => {
             // latest handleNextBlock even though this closure was created
             // when the block started playing (stale closure fix).
             if (!isPlayingRef.current) return;
+            isAtBlockEndRef.current = true;
 
             // Look up the next block so we can decide whether to pause.
             // We only pause at the END of a code section (when the next block
@@ -302,6 +292,13 @@ export const App: React.FC = () => {
     const readable = getReadableBlocks();
     if (readable.length === 0) return;
 
+    // If playback was paused at the end of a block (e.g. via pauseAtHeading/Code/Figure),
+    // pressing play advances to the next block instead of repeating the finished block.
+    if (activeBlock && isAtBlockEndRef.current) {
+      handleNextBlockRef.current();
+      return;
+    }
+
     if (activeBlock) {
       playBlockNarration(activeBlock);
     } else {
@@ -318,6 +315,7 @@ export const App: React.FC = () => {
   // Stop
   const handleStop = useCallback(() => {
     setIsPlaying(false);
+    isAtBlockEndRef.current = false;
     ttsPlayer.stop();
     setActiveHighlight(null);
   }, []);
@@ -341,7 +339,7 @@ export const App: React.FC = () => {
       setCurrentPage(nextPage);
       pdfService.getPageLayout(nextPage).then((layout) => {
         setCurrentPageLayout(layout);
-        const nextReadable = layout.blocks.filter(isBlockReadable);
+        const nextReadable = filterReadableBlocks(layout.blocks, studySettings);
         if (nextReadable.length > 0 && isPlayingRef.current) {
           playBlockNarrationRef.current(nextReadable[0]);
         }
@@ -351,7 +349,7 @@ export const App: React.FC = () => {
       setIsPlaying(false);
       ttsPlayer.stop();
     }
-  }, [getReadableBlocks, isBlockReadable, activeBlock, currentPage, numPages]);
+  }, [getReadableBlocks, studySettings, activeBlock, currentPage, numPages]);
 
   // Keep refs current every render so onEnded closures always have the latest functions
   playBlockNarrationRef.current = playBlockNarration;

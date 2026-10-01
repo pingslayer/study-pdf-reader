@@ -63,6 +63,9 @@ export function analyzePageLayout(
       },
       readingOrderIndex: isHeaderFooter ? -1 : readingOrderCounter++,
       isFiltered: isHeaderFooter || isPageNum || isDiagram,
+      isHeaderFooter,
+      isPageNumber: isPageNum,
+      isDiagram,
       headingLevel: blockType === 'heading' ? getHeadingLevel(raw.fontSize, medianFontSize) : undefined,
       languageHint: blockType === 'code' ? detectCodeLanguage(raw.text) : undefined,
     };
@@ -81,6 +84,7 @@ export function analyzePageLayout(
           const hasDiagramFeatures = isDiagramText(b.text) || !/[.!?]$/.test(b.text.trim());
           if (isShortOrFragment && hasDiagramFeatures) {
             b.type = 'figure';
+            b.isDiagram = true;
             b.isFiltered = true;
           }
         }
@@ -356,7 +360,7 @@ function classifyBlock(
   return 'paragraph';
 }
 
-function isDiagramText(text: string): boolean {
+export function isDiagramText(text: string): boolean {
   const t = text.trim();
   // Contains diagram arrow symbols e.g. ->, <-, -->, <--
   if (t.includes('->') || t.includes('<-') || t.includes('-->') || t.includes('<--') || t.includes('=>')) {
@@ -373,17 +377,21 @@ function isDiagramText(text: string): boolean {
   return false;
 }
 
-function isNumberedHeading(text: string): boolean {
-  return /^(Chapter\s+\d+|Section\s+\d+|\d+\.\d+(\.\d+)?\s+[A-Z])/i.test(text.trim());
+export function isNumberedHeading(text: string): boolean {
+  const t = text.trim();
+  if (/^(Chapter|Section)\s+\d+/i.test(t)) return true;
+  // Numbered sections e.g. "2.1 Virtualizing", "4.1.2 Process States"
+  // Must be followed by a capitalized heading word (case-sensitive) to avoid matching "2.1 seconds"
+  return /^\d+\.\d+(\.\d+)?\s+[A-Z]/.test(t);
 }
 
-function isCaptionText(text: string): boolean {
+export function isCaptionText(text: string): boolean {
   // Real captions have a caption label followed by a delimiter (colon, dash, period with title)
   // e.g. "Figure 2.1: Simple Example...", not body sentences like "Figure 2.1 depicts our first program."
   return /^(Figure|Fig\.|Diagram|Table|Listing|Chart)\s+\d+(\.\d+)?\s*[:\-\—]/i.test(text.trim());
 }
 
-function isEquationText(text: string): boolean {
+export function isEquationText(text: string): boolean {
   const t = text.trim();
   // Check for equation label e.g. "(Equation 4.1)" or "(4.1)"
   const hasEqLabel = /\((Equation\s+)?\d+(\.\d+)?\)$/i.test(t);
@@ -396,7 +404,7 @@ function isEquationText(text: string): boolean {
   return false;
 }
 
-function isCodeSyntax(text: string): boolean {
+export function isCodeSyntax(text: string): boolean {
   const codeIndicators = [
     '#include',
     'int main',
@@ -420,18 +428,18 @@ function isCodeSyntax(text: string): boolean {
   return matches >= 2 || (text.includes('{') && text.includes('}') && matches >= 1);
 }
 
-function isPageNumber(text: string): boolean {
+export function isPageNumber(text: string): boolean {
   const trimmed = text.trim();
   return /^(Page\s*)?\d+$/i.test(trimmed);
 }
 
-function getHeadingLevel(fontSize: number, medianFontSize: number): number {
+export function getHeadingLevel(fontSize: number, medianFontSize: number): number {
   if (fontSize >= medianFontSize * 1.8) return 1;
   if (fontSize >= medianFontSize * 1.4) return 2;
   return 3;
 }
 
-function detectCodeLanguage(text: string): string {
+export function detectCodeLanguage(text: string): string {
   if (text.includes('#include') || text.includes('printf(') || text.includes('int main')) return 'c';
   if (text.includes('def ') || text.includes('import ') || text.includes('print(')) return 'python';
   if (text.includes('function ') || text.includes('const ') || text.includes('console.log')) return 'javascript';

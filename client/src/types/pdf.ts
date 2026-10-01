@@ -39,7 +39,10 @@ export interface PDFBlock {
   items: ExtractedTextItem[];
   bbox: BoundingBox;
   readingOrderIndex: number;
-  isFiltered: boolean; // True if skipped according to study settings (e.g. running header)
+  isFiltered: boolean; // Retained for backwards compatibility
+  isHeaderFooter?: boolean;
+  isPageNumber?: boolean;
+  isDiagram?: boolean;
   headingLevel?: number; // 1, 2, 3
   languageHint?: string; // e.g. 'c', 'python' for code blocks
 }

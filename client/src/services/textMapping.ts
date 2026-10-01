@@ -16,7 +16,7 @@ export function normalizeWord(word: string): string {
     .normalize('NFKD')
     .toLowerCase()
     .replace(/[–—]/g, '-')
-    .replace(/^[^\p{L}\p{N}&]+|[^\p{L}\p{N}&]+$/gu, '') // Strip leading/trailing punctuation except &
+    .replace(/^[^\p{L}\p{N}&#]+|[^\p{L}\p{N}&#]+$/gu, '') // Strip leading/trailing punctuation except & and #
     .trim();
 }
 
@@ -326,7 +326,7 @@ export function findMatchingVisualToken(
 
     for (let idx = searchStart; idx < searchEnd; idx++) {
       const vt = visualTokens[idx];
-      if (charIndex >= vt.charStart - 1 && charIndex <= vt.charEnd + 2) {
+      if (charIndex >= vt.charStart && charIndex <= vt.charEnd) {
         return { token: vt, index: idx };
       }
     }

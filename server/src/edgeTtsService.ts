@@ -1,7 +1,7 @@
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
 import { WordAlignment, TTSResponse } from './ttsService.js';
 
-function sanitizeForTTS(text: string): string {
+export function sanitizeForTTS(text: string): string {
   return text
     // Convert math & diagram arrows to natural speech
     .replace(/->/g, ' to ')

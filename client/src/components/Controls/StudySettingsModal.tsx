@@ -31,27 +31,15 @@ export const StudySettingsModal: React.FC<StudySettingsModalProps> = ({
     recommended: boolean;
   }> = [
     {
-      key: 'skipCodeBlocks',
-      title: 'Auto-skip code listings',
-      description: 'Automatically skips code listings. When off, code is read and you can manually skip anytime by clicking the next block or pressing Next.',
-      recommended: false,
-    },
-    {
-      key: 'skipDiagrams',
-      title: 'Auto-skip diagram text labels',
-      description: 'Skips floating diagram labels and arrows. (Non-textual images are always skipped automatically).',
-      recommended: false,
-    },
-    {
       key: 'skipHeadersFooters',
       title: 'Skip headers & running footers',
-      description: 'Do not read repetitive book titles, chapter headers, or page footers.',
+      description: 'Do not read repetitive book titles, running chapter headers, or page footers.',
       recommended: true,
     },
     {
       key: 'skipPageNumbers',
       title: 'Skip page numbers',
-      description: 'Prevents random standalone page numbers from interrupting technical prose.',
+      description: 'Prevents standalone page numbers from interrupting technical prose.',
       recommended: true,
     },
     {
@@ -61,15 +49,39 @@ export const StudySettingsModal: React.FC<StudySettingsModalProps> = ({
       recommended: true,
     },
     {
+      key: 'readCodeLiterally',
+      title: 'Read code syntax literally',
+      description: 'Speaks programming syntax character-by-character with visual token highlights.',
+      recommended: true,
+    },
+    {
+      key: 'skipCodeBlocks',
+      title: 'Auto-skip code listings',
+      description: 'Automatically jumps over source code listings to keep reading prose.',
+      recommended: false,
+    },
+    {
+      key: 'skipDiagrams',
+      title: 'Auto-skip diagram text labels',
+      description: 'Skips floating diagram labels and arrows. (Non-textual images are always skipped).',
+      recommended: false,
+    },
+    {
+      key: 'readEquations',
+      title: 'Read mathematical equations',
+      description: 'Off by default to avoid raw math symbols sounding awkward before translation.',
+      recommended: false,
+    },
+    {
       key: 'pauseAtFigure',
       title: 'Pause at figures (manual inspect)',
-      description: 'Halts narration when reaching diagrams if you wish to inspect visual figures manually.',
+      description: 'Halts narration when reaching diagrams to let you inspect visual figures manually.',
       recommended: false,
     },
     {
       key: 'pauseAtCode',
       title: 'Pause at code examples (manual review)',
-      description: 'Stops before or after code snippets to review code syntax manually.',
+      description: 'Pauses playback after code snippets so you can review code syntax at your own pace.',
       recommended: false,
     },
     {
@@ -78,75 +90,75 @@ export const StudySettingsModal: React.FC<StudySettingsModalProps> = ({
       description: 'Briefly pause narration at new chapter or section boundaries.',
       recommended: false,
     },
-    {
-      key: 'readEquations',
-      title: 'Read mathematical equations',
-      description: 'Off by default to avoid raw math symbols sounding awkward before Math-to-Speech translation.',
-      recommended: false,
-    },
-    {
-      key: 'readCodeLiterally',
-      title: 'Read code syntax literally',
-      description: 'Speaks programming syntax ("open brace, semicolon") if code skipping is disabled.',
-      recommended: false,
-    },
   ];
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-700 w-full max-w-lg rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+      <div className="bg-zinc-900 border border-zinc-800 w-full max-w-lg rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] text-zinc-100">
         {/* Header */}
-        <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <Sliders className="w-5 h-5 text-sky-400" />
-            <h2 className="text-base font-semibold text-white">Study Controls & Behavior</h2>
+        <div className="px-5 py-3.5 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/90">
+          <div className="flex items-center space-x-2.5">
+            <div className="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400">
+              <Sliders className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-zinc-100 tracking-tight">Study Controls & Behavior</h2>
+              <p className="text-[11px] text-zinc-400">Tailor narration and filtering to your learning style</p>
+            </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition"
+            className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition"
+            title="Close Settings"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Intro */}
-        <div className="px-5 py-3 bg-sky-950/30 border-b border-sky-900/40 flex items-start space-x-2 text-xs text-sky-300">
-          <Info className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
-          <p>
-            StudyPDF Reader favors technical learning over audiobook listening. Configure how code blocks, equations, diagrams, and running headers are handled.
+        {/* Intro Banner */}
+        <div className="px-5 py-2.5 bg-zinc-950/70 border-b border-zinc-800 flex items-start space-x-2.5 text-xs text-zinc-400">
+          <Info className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+          <p className="text-[11px] leading-relaxed">
+            StudyPDF Reader prioritizes technical comprehension over generic audiobook narration. Toggle how code blocks, equations, diagrams, and running headers are handled.
           </p>
         </div>
 
         {/* Setting toggles list */}
-        <div className="p-5 overflow-y-auto space-y-4">
+        <div className="p-4 overflow-y-auto space-y-2.5 custom-scrollbar">
           {settingItems.map((item) => {
             const isEnabled = settings[item.key];
             return (
               <div
                 key={item.key}
                 onClick={() => toggleSetting(item.key)}
-                className="flex items-start justify-between p-3 rounded-lg border border-slate-800 bg-slate-950/50 hover:bg-slate-800/40 cursor-pointer transition select-none"
+                className={`flex items-start justify-between p-3 rounded-lg border transition cursor-pointer select-none ${
+                  isEnabled
+                    ? 'bg-zinc-950/80 border-amber-500/30 hover:border-amber-500/50'
+                    : 'bg-zinc-950/40 border-zinc-800/80 hover:bg-zinc-800/40 hover:border-zinc-700/80'
+                }`}
               >
-                <div className="pr-4">
+                <div className="pr-3">
                   <div className="flex items-center space-x-2">
-                    <span className="text-sm font-medium text-slate-200">{item.title}</span>
+                    <span className={`text-xs font-medium ${isEnabled ? 'text-zinc-100' : 'text-zinc-300'}`}>
+                      {item.title}
+                    </span>
                     {item.recommended && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 font-mono">
+                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30 font-mono">
                         Recommended
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">{item.description}</p>
+                  <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">{item.description}</p>
                 </div>
 
-                <div className="shrink-0 mt-1">
+                <div className="shrink-0 mt-0.5">
                   {isEnabled ? (
-                    <div className="w-5 h-5 rounded bg-sky-600 text-white flex items-center justify-center shadow">
-                      <CheckSquare className="w-4 h-4" />
+                    <div className="w-5 h-5 rounded bg-amber-500 text-zinc-950 flex items-center justify-center shadow-sm">
+                      <CheckSquare className="w-3.5 h-3.5 stroke-[2.5]" />
                     </div>
                   ) : (
-                    <div className="w-5 h-5 rounded border border-slate-600 bg-slate-800 flex items-center justify-center">
-                      <Square className="w-4 h-4 text-transparent" />
+                    <div className="w-5 h-5 rounded border border-zinc-700 bg-zinc-800/60 flex items-center justify-center hover:border-zinc-600 transition">
+                      <Square className="w-3.5 h-3.5 text-transparent" />
                     </div>
                   )}
                 </div>
@@ -156,10 +168,11 @@ export const StudySettingsModal: React.FC<StudySettingsModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-slate-800 bg-slate-950 flex justify-end">
+        <div className="px-5 py-3 border-t border-zinc-800 bg-zinc-900/90 flex items-center justify-between">
+          <span className="text-[11px] text-zinc-500 font-mono">Changes apply immediately</span>
           <button
             onClick={onClose}
-            className="px-4 py-2 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 rounded-lg shadow transition"
+            className="px-4 py-1.5 text-xs font-semibold text-zinc-950 bg-amber-500 hover:bg-amber-400 rounded-lg shadow-sm transition"
           >
             Done
           </button>

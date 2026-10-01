@@ -155,14 +155,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           <button
             onClick={isPlaying ? onPause : onPlay}
-            className={`p-3 rounded-full shadow-lg transition ${
+            className={`w-10 h-10 rounded-full flex items-center justify-center shadow-lg transition-all ${
               isPlaying
-                ? 'bg-amber-500 text-zinc-950 hover:bg-amber-400 ring-2 ring-amber-400/40'
-                : 'bg-zinc-800 text-zinc-100 hover:bg-zinc-700'
+                ? 'bg-zinc-800 text-amber-400 border border-amber-500/40 ring-2 ring-amber-500/20'
+                : 'bg-amber-500 text-zinc-950 hover:bg-amber-400 shadow-amber-500/20 hover:scale-105 active:scale-95'
             }`}
-            title={isPlaying ? 'Pause Narration' : 'Play Narration'}
+            title={isPlaying ? 'Pause' : 'Play'}
           >
-            {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+            {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
           </button>
 
           <button
@@ -263,59 +263,78 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* 2. Hero Playback Console */}
-      <div className="p-4 border-b border-zinc-800/80 bg-zinc-900/40 space-y-3.5">
-        {/* Play/Pause Button */}
-        <button
-          onClick={isPlaying ? onPause : onPlay}
-          className={`w-full py-2.5 px-4 rounded-xl flex items-center justify-center space-x-2.5 font-medium transition shadow-lg ${
-            isPlaying
-              ? 'bg-amber-500 hover:bg-amber-400 text-zinc-950 shadow-amber-500/20'
-              : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-100 border border-zinc-700/60'
-          }`}
-        >
-          {isPlaying ? (
-            <>
-              <Pause className="w-4 h-4" />
-              <span>Pause Narration</span>
-            </>
-          ) : (
-            <>
-              <Play className="w-4 h-4 fill-current" />
-              <span>Read Continuously</span>
-            </>
-          )}
-        </button>
+      <div className="p-4 border-b border-zinc-800/80 bg-zinc-900/40 space-y-3">
+        {/* Playback Progress Tracker */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-[11px] font-mono">
+            <span className="truncate max-w-[170px] text-zinc-300 font-medium">
+              {activeBlock
+                ? `${activeBlock.type.toUpperCase()}${activeBlock.languageHint ? ` • ${activeBlock.languageHint}` : ''}`
+                : 'READY TO READ'}
+            </span>
+            <span className="text-zinc-500 font-semibold">
+              {currentBlockIndex >= 0 ? `${currentBlockIndex + 1} / ${totalBlocks}` : `${totalBlocks} BLOCKS`}
+            </span>
+          </div>
 
-        {/* Step Controls & Block Status */}
-        <div className="flex items-center justify-between bg-zinc-950/50 border border-zinc-800/80 rounded-lg px-2.5 py-1.5">
+          {/* Slim progress bar track */}
+          <div className="w-full h-1 bg-zinc-800/80 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-amber-500 transition-all duration-300 rounded-full"
+              style={{
+                width: `${totalBlocks > 0 && currentBlockIndex >= 0 ? Math.round(((currentBlockIndex + 1) / totalBlocks) * 100) : 0}%`,
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Primary Playback Deck (Prev, Play/Pause Hero, Next, Stop) */}
+        <div className="flex items-center justify-center space-x-4 py-1">
+          {/* Previous Block */}
           <button
             onClick={onPrevBlock}
-            className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition"
+            disabled={currentBlockIndex <= 0}
+            className="p-2 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-zinc-400 transition"
             title="Previous Block"
           >
-            <SkipBack className="w-3.5 h-3.5" />
+            <SkipBack className="w-4 h-4" />
           </button>
 
-          <span className="text-[11px] font-mono text-zinc-400">
-            {currentBlockIndex >= 0 ? `Block ${currentBlockIndex + 1} of ${totalBlocks}` : `${totalBlocks} Blocks on Page`}
-          </span>
+          {/* Central Hero Play / Pause Button - Fixed 48x48px (ZERO JITTER) */}
+          <button
+            onClick={isPlaying ? onPause : onPlay}
+            className={`w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200 shadow-lg shrink-0 ${
+              isPlaying
+                ? 'bg-zinc-800 text-amber-400 border border-amber-500/50 hover:bg-zinc-700 shadow-amber-500/10'
+                : 'bg-amber-500 text-zinc-950 hover:bg-amber-400 hover:scale-105 shadow-amber-500/25 active:scale-95'
+            }`}
+            title={isPlaying ? 'Pause' : 'Play'}
+          >
+            {isPlaying ? (
+              <Pause className="w-5 h-5 fill-current" />
+            ) : (
+              <Play className="w-5 h-5 fill-current ml-0.5" />
+            )}
+          </button>
 
-          <div className="flex items-center space-x-1">
-            <button
-              onClick={onStop}
-              className="p-1 rounded text-zinc-400 hover:text-rose-400 hover:bg-zinc-800 transition"
-              title="Stop Narration"
-            >
-              <Square className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={onNextBlock}
-              className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition"
-              title="Skip to Next Block"
-            >
-              <SkipForward className="w-3.5 h-3.5" />
-            </button>
-          </div>
+          {/* Next Block */}
+          <button
+            onClick={onNextBlock}
+            disabled={totalBlocks > 0 && currentBlockIndex >= totalBlocks - 1}
+            className="p-2 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-zinc-400 transition"
+            title="Next Block"
+          >
+            <SkipForward className="w-4 h-4" />
+          </button>
+
+          {/* Stop / Reset */}
+          <button
+            onClick={onStop}
+            className="p-2 rounded-lg text-zinc-400 hover:text-rose-400 hover:bg-zinc-800 transition"
+            title="Stop Narration"
+          >
+            <Square className="w-3.5 h-3.5" />
+          </button>
         </div>
 
         {/* Speed Pills */}
