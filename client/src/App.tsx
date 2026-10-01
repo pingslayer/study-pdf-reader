@@ -402,14 +402,6 @@ export const App: React.FC = () => {
     ttsPlayer.setVolume(newVol);
   };
 
-  // Toggle code literal reading
-  const handleToggleCodeLiterally = () => {
-    setStudySettings((prev) => ({
-      ...prev,
-      readCodeLiterally: !prev.readCodeLiterally,
-    }));
-  };
-
   // Fit Width & Fit Page scale calculations
   const handleFitWidth = useCallback(() => {
     if (!currentPageLayout) return;
@@ -497,8 +489,6 @@ export const App: React.FC = () => {
             handleSelectBlock(b);
           }
         }}
-        readCodeLiterally={studySettings.readCodeLiterally}
-        onToggleCodeLiterally={handleToggleCodeLiterally}
         isOpen={sidebarOpen}
         onToggleOpen={() => setSidebarOpen(!sidebarOpen)}
       />
