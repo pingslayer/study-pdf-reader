@@ -53,3 +53,12 @@ Thumbs.db
 *.swo
 *.sublime-project
 *.sublime-workspace
+# Database & User Uploads
+server/db/
+server/uploads/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3

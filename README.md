@@ -10,6 +10,8 @@ Unlike typical text-to-speech tools that strip away layout and dump text into a 
 ## Key Highlights
 
 - **Unobstructed Adobe Acrobat Dark-Mode Aesthetic**: Zero headers, zero footers, and no floating pills overlaying your text. The PDF viewing viewport spans 100% of the vertical screen height for focused, distraction-free reading.
+- **Persistent Library & Reading Progress**: Upload PDFs directly to a local dashboard. The app securely stores them on your machine using SQLite and automatically remembers the exact page you last read so you can resume instantly.
+- **Explicit Bookmarking System**: Save important references, diagrams, and code snippets across your reading. Quickly jump back to key concepts via the unified sidebar tab, independent of your active reading progress.
 - **Word-Level Synchronized TTS Highlighting**: Words on the PDF canvas light up in real-time in exact lockstep with spoken audio using sub-millisecond audio timestamps.
 - **Free Edge Neural TTS Out-of-the-Box**: Powered by Microsoft Edge Neural voices (no API keys, subscriptions, or credit cards required), with optional ElevenLabs integration for custom cloned voices.
 - **Academic & Technical Layout Intelligence**:
@@ -32,6 +34,7 @@ StudyPDF_Reader/
 │   │   ├── components/
 │   │   │   ├── PDFViewer/      # PDF.js Canvas + Synchronized Highlight Layer
 │   │   │   ├── Sidebar.tsx     # Unified Playback & Navigation Control Hub
+│   │   │   ├── Library.tsx     # Dashboard for uploaded PDFs and reading progress
 │   │   │   └── Controls/       # Study Settings & API Modals
 │   │   ├── services/
 │   │   │   ├── layoutAnalysis.ts # Heading, Code, Paragraph, Header/Footer heuristics
@@ -40,12 +43,17 @@ StudyPDF_Reader/
 │   │   │   └── ttsClient.ts      # Web Audio API streaming & alignment player
 │   │   └── types/pdf.ts          # Core geometry and block data models
 │   └── package.json
-├── server/                     # Node.js + Express + TypeScript
+├── server/                     # Node.js + Express + SQLite + TypeScript
 │   ├── src/
 │   │   ├── tts/
 │   │   │   ├── edgeTTS.ts      # Microsoft Edge Neural TTS with SSML word timestamps
 │   │   │   └── elevenlabs.ts   # ElevenLabs Streaming API with alignment
-│   │   └── index.ts            # REST API endpoints (/api/tts, /api/voices, /api/health)
+│   │   ├── db.ts               # SQLite Database initialization
+│   │   ├── libraryRoutes.ts    # API for uploads and document progress
+│   │   ├── bookmarkRoutes.ts   # API for managing document bookmarks
+│   │   └── index.ts            # REST API endpoints
+│   ├── uploads/                # Local persistent PDF file storage
+│   ├── db/                     # SQLite database (library.db)
 │   └── package.json
 └── package.json                # Root workspace orchestration (concurrently)
 ```
@@ -101,10 +109,10 @@ If you also wish to use ElevenLabs:
 
 ## How to Use
 
-1. **Load a Document**:
-   - The app boots with a built-in sample chapter from *Operating Systems: Three Easy Pieces (OSTEP)* (`OSTEP_Chapter4_Processes.pdf`).
-   - Click the **Upload** button in the sidebar to open any PDF from your local machine.
-   - Click **Reset Sample** in the sidebar footer at any time to return to the sample textbook.
+1. **The Library Dashboard**:
+   - The app boots into your local **Library**, showing all previously uploaded PDFs and your reading progress.
+   - Click the **Upload** button to add a new PDF from your local machine.
+   - Click on any book in your grid to instantly jump back to exactly where you left off.
 
 2. **Playback & Narration**:
    - Click **Play** in the sidebar (or press `Spacebar`) to begin continuous narration from the current block.
@@ -126,7 +134,11 @@ If you also wish to use ElevenLabs:
      - Read figure captions (Default: `ON`)
      - Pause at headings / code / figures (Default: `OFF` for continuous reading)
 
-6. **Keyboard Shortcuts**:
+6. **Bookmarks**:
+   - Click the **Bookmark** icon at the top of the sidebar to save the current page for reference.
+   - Switch to the **Bookmarks** tab in the sidebar to view all saved references and instantly jump back to critical diagrams or concepts without losing your place.
+
+7. **Keyboard Shortcuts**:
    - `Space`: Play / Pause narration.
    - `Arrow Left`: Navigate to previous page.
    - `Arrow Right`: Navigate to next page.

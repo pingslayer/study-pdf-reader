@@ -1,0 +1,146 @@
+--- client/src/App.tsx
++++ client/src/App.tsx
+@@ -5,6 +5,7 @@
+ import { ApiKeyModal } from './components/Controls/ApiKeyModal';
+ import { PageLayoutData, PDFBlock, StudySettings, BoundingBox } from './types/pdf';
+ import { pdfService } from './services/pdfService';
++import { Library, Document } from './components/Library';
+ import { ttsPlayer } from './services/ttsClient';
+ import {
+   buildVisualTokensFromBlock,
+@@ -21,6 +22,7 @@
+   const [currentPage, setCurrentPage] = useState(1);
+   const [currentPageLayout, setCurrentPageLayout] = useState<PageLayoutData | null>(null);
+   const [scale, setScale] = useState(1.15);
++  const [activeDocument, setActiveDocument] = useState<Document | null>(null);
+ 
+   // UI state
+   const [sidebarOpen, setSidebarOpen] = useState(true);
+@@ -107,17 +109,36 @@
+       .catch(console.error);
+   }, []);
+ 
+-  // Load initial sample document
+-  const loadDocumentFromSource = useCallback(async (source: string | ArrayBuffer, name: string) => {
++  // Load document from library
++  const loadLibraryDocument = useCallback(async (doc: Document) => {
+     try {
++      const res = await fetch(`http://localhost:3001/api/library/${doc.id}/file`);
++      if (!res.ok) throw new Error('Failed to load file');
++      const buffer = await res.arrayBuffer();
++      
+       ttsPlayer.stop();
+       setIsPlaying(false);
+       setActiveBlock(null);
+       setActiveHighlight(null);
+ 
+-      const total = await pdfService.loadDocument(source);
++      const total = await pdfService.loadDocument(buffer);
+       setNumPages(total);
+-      setFileName(name);
++      setFileName(doc.original_name);
++      
++      const startPage = Math.min(Math.max(1, doc.last_read_page), total);
++      setCurrentPage(startPage);
++      
++      const layout = await pdfService.getPageLayout(startPage);
++      setCurrentPageLayout(layout);
++      
++      setActiveDocument(doc);
++    } catch (err) {
++      console.error('Failed to load PDF document:', err);
++      alert('Failed to load PDF document: ' + (err as any).message);
++    }
++  }, []);
++
++  // Load raw source
++  const loadDocumentFromSource = useCallback(async (source: string | ArrayBuffer, name: string) => {
++    try {
++      ttsPlayer.stop();
++      setIsPlaying(false);
++      setActiveBlock(null);
++      setActiveHighlight(null);
++
++      const total = await pdfService.loadDocument(source);
++      setNumPages(total);
++      setFileName(name);
+       setCurrentPage(1);
+ 
+       // Load layout for page 1
+@@ -130,10 +151,6 @@
+     }
+   }, []);
+ 
+-  useEffect(() => {
+-    loadDocumentFromSource('/samples/ostep_sample.pdf', 'OSTEP_Chapter4_Processes.pdf');
+-  }, [loadDocumentFromSource]);
+-
+   // Load layout whenever current page changes
+   useEffect(() => {
+     if (currentPage > 0 && numPages > 0) {
+@@ -148,8 +165,15 @@
+   // Handle user uploading custom PDF
+   const handleFileUpload = async (file: File) => {
+-    const buffer = await file.arrayBuffer();
+-    loadDocumentFromSource(buffer, file.name);
++    const formData = new FormData();
++    formData.append('file', file);
++    try {
++      const res = await fetch('http://localhost:3001/api/library/upload', { method: 'POST', body: formData });
++      if (res.ok) {
++        const doc = await res.json();
++        loadLibraryDocument(doc);
++      }
++    } catch (err) {
++      console.error('Upload failed', err);
++    }
+   };
+ 
+   // Handle loading sample OSTEP chapter
+@@ -308,12 +332,22 @@
+     [getReadableBlocks, activeBlock, isPlaying, playBlockNarration, handleSelectBlock]);
+ 
++  // Sync progress
++  const syncProgress = useCallback((page: number) => {
++    if (activeDocument) {
++      fetch(`http://localhost:3001/api/library/${activeDocument.id}/progress`, {
++        method: 'PUT',
++        headers: { 'Content-Type': 'application/json' },
++        body: JSON.stringify({ last_read_page: page }),
++      }).catch(console.error);
++    }
++  }, [activeDocument]);
++
+   // Page navigation
+   const handlePageChange = useCallback(
+     (page: number) => {
+       if (page >= 1 && page <= numPages) {
+         ttsPlayer.stop();
+         setIsPlaying(false);
+         setActiveBlock(null);
+         setActiveHighlight(null);
+         setCurrentPage(page);
++        syncProgress(page);
+       }
+     },
+-    [numPages]
++    [numPages, syncProgress]
+   );
+ 
+@@ -370,6 +404,19 @@
+     : -1;
+ 
++  // Back to Library
++  const handleBackToLibrary = () => {
++    ttsPlayer.stop();
++    setIsPlaying(false);
++    setActiveBlock(null);
++    setActiveDocument(null);
++  };
++
++  if (!activeDocument) {
++    return <Library onDocumentSelect={loadLibraryDocument} />;
++  }
++
+   return (
+     <div className="flex h-screen w-screen bg-zinc-950 text-zinc-100 overflow-hidden font-sans">

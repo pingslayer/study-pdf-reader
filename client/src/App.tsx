@@ -5,6 +5,7 @@ import { StudySettingsModal } from './components/Controls/StudySettingsModal';
 import { ApiKeyModal } from './components/Controls/ApiKeyModal';
 import { PageLayoutData, PDFBlock, StudySettings, BoundingBox } from './types/pdf';
 import { pdfService } from './services/pdfService';
+import { Library, Document } from './components/Library';
 import { ttsPlayer } from './services/ttsClient';
 import {
   buildVisualTokensFromBlock,
@@ -21,6 +22,7 @@ export const App: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [currentPageLayout, setCurrentPageLayout] = useState<PageLayoutData | null>(null);
   const [scale, setScale] = useState(1.15);
+  const [activeDocument, setActiveDocument] = useState<Document | null>(null);
 
   // UI state
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -114,6 +116,35 @@ export const App: React.FC = () => {
   }, []);
 
   // Load initial sample document
+  
+  const loadLibraryDocument = useCallback(async (doc: Document) => {
+    try {
+      const res = await fetch(`http://localhost:3001/api/library/${doc.id}/file`);
+      if (!res.ok) throw new Error('Failed to load file');
+      const buffer = await res.arrayBuffer();
+      
+      ttsPlayer.stop();
+      setIsPlaying(false);
+      setActiveBlock(null);
+      setActiveHighlight(null);
+      
+      const total = await pdfService.loadDocument(buffer);
+      setNumPages(total);
+      setFileName(doc.original_name);
+      
+      const startPage = Math.min(Math.max(1, doc.last_read_page), total);
+      setCurrentPage(startPage);
+      
+      const layout = await pdfService.getPageLayout(startPage);
+      setCurrentPageLayout(layout);
+      
+      setActiveDocument(doc);
+    } catch (err) {
+      console.error('Failed to load PDF document:', err);
+      alert('Failed to load PDF document: ' + (err as any).message);
+    }
+  }, []);
+
   const loadDocumentFromSource = useCallback(async (source: string | ArrayBuffer, name: string) => {
     try {
       ttsPlayer.stop();
@@ -135,9 +166,7 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => {
-    loadDocumentFromSource('/samples/ostep_sample.pdf', 'OSTEP_Chapter4_Processes.pdf');
-  }, [loadDocumentFromSource]);
+  
 
   // Load layout whenever current page changes
   useEffect(() => {
@@ -153,8 +182,17 @@ export const App: React.FC = () => {
 
   // Handle user uploading custom PDF
   const handleFileUpload = async (file: File) => {
-    const buffer = await file.arrayBuffer();
-    loadDocumentFromSource(buffer, file.name);
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch('http://localhost:3001/api/library/upload', { method: 'POST', body: formData });
+      if (res.ok) {
+        const doc = await res.json();
+        loadLibraryDocument(doc);
+      }
+    } catch (err) {
+      console.error('Upload failed', err);
+    }
   };
 
   // Handle loading sample OSTEP chapter
@@ -376,6 +414,16 @@ export const App: React.FC = () => {
     }
   }, [getReadableBlocks, activeBlock, isPlaying, playBlockNarration, handleSelectBlock]);
 
+const syncProgress = useCallback((page: number) => {
+    if (activeDocument) {
+      fetch(`http://localhost:3001/api/library/${activeDocument.id}/progress`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ last_read_page: page }),
+      }).catch(console.error);
+    }
+  }, [activeDocument]);
+
   // Page navigation
   const handlePageChange = useCallback(
     (page: number) => {
@@ -385,9 +433,10 @@ export const App: React.FC = () => {
         setActiveBlock(null);
         setActiveHighlight(null);
         setCurrentPage(page);
+        syncProgress(page);
       }
     },
-    [numPages]
+    [numPages, syncProgress]
   );
 
   // Speed change
@@ -449,6 +498,19 @@ export const App: React.FC = () => {
     ? readableBlocks.findIndex((b) => b.id === activeBlock.id)
     : -1;
 
+
+  // Back to Library
+  const handleBackToLibrary = () => {
+    ttsPlayer.stop();
+    setIsPlaying(false);
+    setActiveBlock(null);
+    setActiveDocument(null);
+  };
+
+  if (!activeDocument) {
+    return <Library onDocumentSelect={loadLibraryDocument} />;
+  }
+
   return (
     <div className="flex h-screen w-screen bg-zinc-950 text-zinc-100 overflow-hidden font-sans">
       {/* Unified All-in-One Control Sidebar */}
@@ -491,6 +553,8 @@ export const App: React.FC = () => {
         }}
         isOpen={sidebarOpen}
         onToggleOpen={() => setSidebarOpen(!sidebarOpen)}
+        onBackToLibrary={handleBackToLibrary}
+        activeDocumentId={activeDocument?.id || null}
       />
 
       {/* 100% Vertical Height Unobstructed PDF Viewport */}

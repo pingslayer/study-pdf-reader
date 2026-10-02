@@ -17,6 +17,12 @@ app.use(express.json({ limit: '10mb' }));
 const elevenLabsService = new TTSService();
 const edgeTtsService = new EdgeTTSService();
 
+import libraryRoutes from './libraryRoutes.js';
+import bookmarkRoutes from './bookmarkRoutes.js';
+
+app.use('/api/library', libraryRoutes);
+app.use('/api/bookmarks', bookmarkRoutes);
+
 // Default provider: Edge Neural TTS (Free, high-quality, unlimited with word timestamps)
 let activeProvider: 'edge' | 'elevenlabs' = 'edge';
 
