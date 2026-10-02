@@ -9,7 +9,7 @@ Unlike typical text-to-speech tools that strip away layout and dump text into a 
 
 ## Key Highlights
 
-- **Unobstructed Adobe Acrobat Dark-Mode Aesthetic**: Zero headers, zero footers, and no floating pills overlaying your text. The PDF viewing viewport spans 100% of the vertical screen height for focused, distraction-free reading.
+- **Unobstructed Professional Dark-Mode Aesthetic**: Zero headers, zero footers, and no floating pills overlaying your text. The PDF viewing viewport spans 100% of the vertical screen height for focused, distraction-free reading.
 - **Persistent Library & Reading Progress**: Upload PDFs directly to a local dashboard. The app securely stores them on your machine using SQLite and automatically remembers the exact page you last read so you can resume instantly.
 - **Explicit Bookmarking System**: Save important references, diagrams, and code snippets across your reading. Quickly jump back to key concepts via the unified sidebar tab, independent of your active reading progress.
 - **Word-Level Synchronized TTS Highlighting**: Words on the PDF canvas light up in real-time in exact lockstep with spoken audio using sub-millisecond audio timestamps.
