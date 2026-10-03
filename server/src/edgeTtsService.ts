@@ -20,7 +20,7 @@ export function sanitizeForTTS(text: string): string {
 }
 
 export class EdgeTTSService {
-  private defaultVoice: string = 'en-US-GuyNeural';
+  private defaultVoice: string = 'en-US-AvaMultilingualNeural';
 
   public async generateSpeech(text: string, voiceId?: string): Promise<TTSResponse> {
     const selectedVoice = voiceId && voiceId.includes('Neural') ? voiceId : this.defaultVoice;
@@ -126,11 +126,14 @@ export class EdgeTTSService {
 
   public async getVoices(): Promise<Array<{ id: string; name: string; category: string }>> {
     return [
+      { id: 'en-US-AvaMultilingualNeural', name: 'Ava (Conversational, Expressive Female)', category: 'Neural (Free)' },
+      { id: 'en-US-AndrewMultilingualNeural', name: 'Andrew (Warm, Narrative Male)', category: 'Neural (Free)' },
+      { id: 'en-US-EmmaMultilingualNeural', name: 'Emma (Clear, Lively Female)', category: 'Neural (Free)' },
+      { id: 'en-US-BrianMultilingualNeural', name: 'Brian (Engaging, Natural Male)', category: 'Neural (Free)' },
       { id: 'en-US-GuyNeural', name: 'Guy (Natural, Expressive Male)', category: 'Neural (Free)' },
       { id: 'en-US-JennyNeural', name: 'Jenny (Natural, Friendly Female)', category: 'Neural (Free)' },
       { id: 'en-US-ChristopherNeural', name: 'Christopher (Deep, Academic Male)', category: 'Neural (Free)' },
       { id: 'en-US-AriaNeural', name: 'Aria (Clear, Professional Female)', category: 'Neural (Free)' },
-      { id: 'en-US-EricNeural', name: 'Eric (Conversational Male)', category: 'Neural (Free)' },
       { id: 'en-GB-RyanNeural', name: 'Ryan (British Natural Male)', category: 'Neural (Free)' },
       { id: 'en-GB-SoniaNeural', name: 'Sonia (British Natural Female)', category: 'Neural (Free)' },
     ];

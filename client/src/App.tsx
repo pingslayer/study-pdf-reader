@@ -6,7 +6,7 @@ import { ApiKeyModal } from './components/Controls/ApiKeyModal';
 import { PageLayoutData, PDFBlock, StudySettings, BoundingBox } from './types/pdf';
 import { pdfService } from './services/pdfService';
 import { Library, Document } from './components/Library';
-import { ttsPlayer } from './services/ttsClient';
+import { ttsPlayer, TTSClientResponse } from './services/ttsClient';
 import {
   buildVisualTokensFromBlock,
   buildVisualTokensFromAlignment,
@@ -14,6 +14,26 @@ import {
   VisualToken,
 } from './services/textMapping';
 import { isBlockReadable, filterReadableBlocks } from './services/studySettings';
+
+function getSpokenTextForBlock(
+  block: PDFBlock,
+  settings: StudySettings,
+  visualTokens?: VisualToken[]
+): string {
+  if (block.type === 'code') {
+    if (settings.readCodeLiterally) {
+      return visualTokens && visualTokens.length > 0
+        ? visualTokens.map((vt) => vt.word).join(' ')
+        : block.text.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+    } else {
+      return 'Code example. ' + (block.languageHint ? `${block.languageHint} code.` : '');
+    }
+  }
+  if (visualTokens && visualTokens.length > 0) {
+    return visualTokens.map((vt) => vt.word).join(' ');
+  }
+  return block.text.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+}
 
 export const App: React.FC = () => {
   // Document state
@@ -35,13 +55,12 @@ export const App: React.FC = () => {
   const [hasElevenLabsKey, setHasElevenLabsKey] = useState(false);
   const [activeProvider, setActiveProvider] = useState<'edge' | 'elevenlabs'>('edge');
   const [availableVoices, setAvailableVoices] = useState<Array<{ id: string; name: string }>>([
+    { id: 'en-US-AvaMultilingualNeural', name: 'Ava (Conversational, Expressive Female)' },
+    { id: 'en-US-AndrewMultilingualNeural', name: 'Andrew (Warm, Narrative Male)' },
     { id: 'en-US-GuyNeural', name: 'Guy (Natural, Expressive Male)' },
     { id: 'en-US-JennyNeural', name: 'Jenny (Natural, Friendly Female)' },
-    { id: 'en-US-ChristopherNeural', name: 'Christopher (Deep, Academic Male)' },
-    { id: 'en-US-AriaNeural', name: 'Aria (Clear, Professional Female)' },
-    { id: 'en-US-EricNeural', name: 'Eric (Conversational Male)' },
   ]);
-  const [selectedVoice, setSelectedVoice] = useState('en-US-GuyNeural');
+  const [selectedVoice, setSelectedVoice] = useState('en-US-AvaMultilingualNeural');
 
   // Study Settings: continuous reading without stopping (skip only running headers & page numbers)
   const [studySettings, setStudySettings] = useState<StudySettings>({
@@ -69,6 +88,9 @@ export const App: React.FC = () => {
   const lastMatchedTokenIndexRef = useRef<number>(0);
   const isPlayingRef = useRef(false);
   isPlayingRef.current = isPlaying;
+
+  // Background prefetch cache: maps "blockId:voiceId" to in-flight or resolved TTS Promise
+  const prefetchCacheRef = useRef<Map<string, Promise<TTSClientResponse>>>(new Map());
 
   // Always-current refs so stale closures inside audio callbacks can call
   // the latest version of these functions without being re-created every render.
@@ -222,26 +244,18 @@ export const App: React.FC = () => {
       handleSelectBlock(block);
       setIsPlaying(true);
 
-      // 1. Single Source of Truth:
-      // Derive spokenText directly from visualTokensRef.current so the word sequence
-      // fed to the TTS engine is guaranteed to be an exact 1-to-1 mirror of the highlight boxes.
-      let spokenText = '';
-      if (block.type === 'code') {
-        if (studySettings.readCodeLiterally) {
-          spokenText = visualTokensRef.current.length > 0
-            ? visualTokensRef.current.map((vt) => vt.word).join(' ')
-            : block.text.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
-        } else {
-          spokenText = 'Code example. ' + (block.languageHint ? `${block.languageHint} code.` : '');
-        }
-      } else if (visualTokensRef.current.length > 0) {
-        spokenText = visualTokensRef.current.map((vt) => vt.word).join(' ');
-      } else {
-        spokenText = block.text.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
-      }
+      const spokenText = getSpokenTextForBlock(block, studySettings, visualTokensRef.current);
 
       try {
-        const ttsData = await ttsPlayer.fetchTTS(spokenText, selectedVoice);
+        const cacheKey = `${block.id}:${selectedVoice}`;
+        let ttsPromise = prefetchCacheRef.current.get(cacheKey);
+        if (!ttsPromise) {
+          ttsPromise = ttsPlayer.fetchTTS(spokenText, selectedVoice);
+        }
+        // Remove used entry from cache
+        prefetchCacheRef.current.delete(cacheKey);
+
+        const ttsData = await ttsPromise;
 
         // Ground-Truth Synchronization:
         // Build visual tokens directly from the TTS alignment words so that the screen's
@@ -249,6 +263,43 @@ export const App: React.FC = () => {
         if (ttsData.alignment && ttsData.alignment.length > 0) {
           visualTokensRef.current = buildVisualTokensFromAlignment(block, ttsData.alignment);
           lastMatchedTokenIndexRef.current = 0;
+        }
+
+        // Sliding Window Background Prefetch: quietly buffer up to 2 readable blocks ahead
+        // sequentially to ensure short blocks never cause lag, without spamming parallel connections.
+        const readable = getReadableBlocks();
+        const currIdx = readable.findIndex((b) => b.id === block.id);
+        const upcomingBlocks = currIdx >= 0 ? readable.slice(currIdx + 1, currIdx + 1 + 2) : [];
+
+        if (upcomingBlocks.length > 0) {
+          (async () => {
+            for (const b of upcomingBlocks) {
+              if (!isPlayingRef.current) break;
+              const nextKey = `${b.id}:${selectedVoice}`;
+              if (prefetchCacheRef.current.has(nextKey)) continue;
+
+              const nextTokens = buildVisualTokensFromBlock(b);
+              const nextSpokenText = getSpokenTextForBlock(b, studySettings, nextTokens);
+              if (!nextSpokenText || nextSpokenText.trim().length === 0) continue;
+
+              try {
+                const nextPromise = ttsPlayer.fetchTTS(nextSpokenText, selectedVoice);
+                prefetchCacheRef.current.set(nextKey, nextPromise);
+
+                // Maintain max cache size of 15
+                if (prefetchCacheRef.current.size > 15) {
+                  const firstKey = prefetchCacheRef.current.keys().next().value;
+                  if (firstKey) prefetchCacheRef.current.delete(firstKey);
+                }
+
+                // Await this block before requesting the next to keep network concurrency safe (1 at a time)
+                await nextPromise;
+              } catch (err) {
+                console.warn('Background prefetch failed for block:', b.id, err);
+                prefetchCacheRef.current.delete(nextKey);
+              }
+            }
+          })();
         }
 
         ttsPlayer.playWithAlignment(
@@ -282,10 +333,10 @@ export const App: React.FC = () => {
             // is not also code), so a C program split across several blocks
             // flows continuously rather than stopping after the first chunk.
             const readableForPause = getReadableBlocks();
-            const currIdx = readableForPause.findIndex((b) => b.id === block.id);
-            const nextBlock = currIdx >= 0 ? readableForPause[currIdx + 1] : undefined;
+            const cIdx = readableForPause.findIndex((b) => b.id === block.id);
+            const nBlock = cIdx >= 0 ? readableForPause[cIdx + 1] : undefined;
 
-            if (studySettings.pauseAtCode && block.type === 'code' && nextBlock?.type !== 'code') {
+            if (studySettings.pauseAtCode && block.type === 'code' && nBlock?.type !== 'code') {
               setIsPlaying(false);
               return;
             }
@@ -354,6 +405,7 @@ export const App: React.FC = () => {
   const handleStop = useCallback(() => {
     setIsPlaying(false);
     isAtBlockEndRef.current = false;
+    prefetchCacheRef.current.clear();
     ttsPlayer.stop();
     setActiveHighlight(null);
   }, []);
@@ -414,7 +466,7 @@ export const App: React.FC = () => {
     }
   }, [getReadableBlocks, activeBlock, isPlaying, playBlockNarration, handleSelectBlock]);
 
-const syncProgress = useCallback((page: number) => {
+  const syncProgress = useCallback((page: number) => {
     if (activeDocument) {
       fetch(`http://localhost:3001/api/library/${activeDocument.id}/progress`, {
         method: 'PUT',
@@ -432,12 +484,19 @@ const syncProgress = useCallback((page: number) => {
         setIsPlaying(false);
         setActiveBlock(null);
         setActiveHighlight(null);
+        prefetchCacheRef.current.clear();
         setCurrentPage(page);
         syncProgress(page);
       }
     },
     [numPages, syncProgress]
   );
+
+  // Voice change with cache invalidation
+  const handleVoiceChange = useCallback((newVoice: string) => {
+    prefetchCacheRef.current.clear();
+    setSelectedVoice(newVoice);
+  }, []);
 
   // Speed change
   const handleSpeedChange = (newSpeed: number) => {
@@ -504,6 +563,7 @@ const syncProgress = useCallback((page: number) => {
     ttsPlayer.stop();
     setIsPlaying(false);
     setActiveBlock(null);
+    prefetchCacheRef.current.clear();
     setActiveDocument(null);
   };
 
@@ -534,7 +594,7 @@ const syncProgress = useCallback((page: number) => {
         onPrevBlock={handlePrevBlock}
         onNextBlock={handleNextBlock}
         onSpeedChange={handleSpeedChange}
-        onVoiceChange={setSelectedVoice}
+        onVoiceChange={handleVoiceChange}
         onVolumeChange={handleVolumeChange}
         numPages={numPages}
         currentPage={currentPage}
