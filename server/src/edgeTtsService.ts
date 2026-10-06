@@ -96,8 +96,20 @@ export class EdgeTTSService {
       }
 
       await new Promise<void>((resolve, reject) => {
-        audioStream.on('end', () => resolve());
-        audioStream.on('error', (err) => reject(err));
+        // Generous adaptive timeout: allow minimum 45s for connection + synthesis, scaling with text length
+        const timeoutMs = Math.max(45000, Math.ceil(speechText.length * 80));
+        const timeout = setTimeout(() => {
+          reject(new Error('TTS synthesis timed out. Please check your internet connection.'));
+        }, timeoutMs);
+
+        audioStream.on('end', () => {
+          clearTimeout(timeout);
+          resolve();
+        });
+        audioStream.on('error', (err) => {
+          clearTimeout(timeout);
+          reject(err);
+        });
       });
 
       const audioBuffer = Buffer.concat(audioChunks);
@@ -110,13 +122,8 @@ export class EdgeTTSService {
         duration,
       };
     } catch (err: any) {
-      console.warn('Edge TTS synthesis warning (skipping gracefully):', err.message);
-      // Return empty audio response so the reading flow advances without popping up an alert
-      return {
-        audioUrl: '',
-        alignment: [],
-        duration: 0.2,
-      };
+      console.warn('Edge TTS synthesis failed:', err.message);
+      throw new Error(`Voice synthesis failed: ${err.message || 'Network error'}. Please check your internet connection.`);
     } finally {
       try {
         tts.close();

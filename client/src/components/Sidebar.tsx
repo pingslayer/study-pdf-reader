@@ -23,6 +23,7 @@ import {
   FileText,
   Mic,
   Gauge,
+  Loader2,
 } from 'lucide-react';
 import { PageLayoutData, PDFBlock, BlockType } from '../types/pdf';
 
@@ -36,6 +37,7 @@ interface SidebarProps {
 
   // Playback state & controls
   isPlaying: boolean;
+  isBuffering?: boolean;
   speed: number;
   volume: number;
   selectedVoice: string;
@@ -78,6 +80,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onFileUpload,
   onOpenSettings,
   isPlaying,
+  isBuffering = false,
   speed,
   volume,
   selectedVoice,
@@ -196,15 +199,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
 
           <button
-            onClick={isPlaying ? onPause : onPlay}
+            onClick={isPlaying || isBuffering ? onPause : onPlay}
             className={`w-10 h-10 rounded-full flex items-center justify-center shadow-lg transition-all ${
-              isPlaying
+              isBuffering
+                ? 'bg-zinc-800 text-amber-400 border border-amber-500/60 ring-2 ring-amber-500/20 animate-pulse hover:bg-zinc-700'
+                : isPlaying
                 ? 'bg-zinc-800 text-amber-400 border border-amber-500/40 ring-2 ring-amber-500/20'
                 : 'bg-amber-500 text-zinc-950 hover:bg-amber-400 shadow-amber-500/20 hover:scale-105 active:scale-95'
             }`}
-            title={isPlaying ? 'Pause' : 'Play'}
+            title={isBuffering ? 'Buffering Audio (Click to Cancel)...' : isPlaying ? 'Pause' : 'Play'}
           >
-            {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
+            {isBuffering ? (
+              <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+            ) : isPlaying ? (
+              <Pause className="w-4 h-4 fill-current" />
+            ) : (
+              <Play className="w-4 h-4 fill-current ml-0.5" />
+            )}
           </button>
 
           {/* Quick Page Nav in Rail */}
@@ -445,10 +456,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Playback Progress Tracker */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-[11px] font-mono">
-            <span className="truncate max-w-[170px] text-zinc-300 font-medium">
-              {activeBlock
-                ? `${activeBlock.type.toUpperCase()}${activeBlock.languageHint ? ` • ${activeBlock.languageHint}` : ''}`
-                : 'READY TO READ'}
+            <span className="truncate max-w-[170px] font-medium">
+              {isBuffering ? (
+                <span className="text-amber-400 flex items-center space-x-1.5 animate-pulse">
+                  <Loader2 className="w-3 h-3 animate-spin inline mr-1" />
+                  BUFFERING AUDIO...
+                </span>
+              ) : activeBlock ? (
+                <span className="text-zinc-300">
+                  {`${activeBlock.type.toUpperCase()}${activeBlock.languageHint ? ` • ${activeBlock.languageHint}` : ''}`}
+                </span>
+              ) : (
+                <span className="text-zinc-300">READY TO READ</span>
+              )}
             </span>
             <span className="text-zinc-500 font-semibold">
               {currentBlockIndex >= 0 ? `${currentBlockIndex + 1} / ${totalBlocks}` : `${totalBlocks} BLOCKS`}
@@ -458,7 +478,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* Slim progress bar track */}
           <div className="w-full h-1 bg-zinc-800/80 rounded-full overflow-hidden">
             <div
-              className="h-full bg-amber-500 transition-all duration-300 rounded-full"
+              className={`h-full transition-all duration-300 rounded-full ${isBuffering ? 'bg-amber-400 animate-pulse' : 'bg-amber-500'}`}
               style={{
                 width: `${totalBlocks > 0 && currentBlockIndex >= 0 ? Math.round(((currentBlockIndex + 1) / totalBlocks) * 100) : 0}%`,
               }}
@@ -480,15 +500,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           {/* Central Hero Play / Pause Button - Fixed 48x48px (ZERO JITTER) */}
           <button
-            onClick={isPlaying ? onPause : onPlay}
+            onClick={isPlaying || isBuffering ? onPause : onPlay}
             className={`w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200 shadow-lg shrink-0 ${
-              isPlaying
+              isBuffering
+                ? 'bg-zinc-800 text-amber-400 border border-amber-500/60 ring-2 ring-amber-500/20 animate-pulse hover:bg-zinc-700'
+                : isPlaying
                 ? 'bg-zinc-800 text-amber-400 border border-amber-500/50 hover:bg-zinc-700 shadow-amber-500/10'
                 : 'bg-amber-500 text-zinc-950 hover:bg-amber-400 hover:scale-105 shadow-amber-500/25 active:scale-95'
             }`}
-            title={isPlaying ? 'Pause' : 'Play'}
+            title={isBuffering ? 'Buffering Audio (Click to Cancel)...' : isPlaying ? 'Pause' : 'Play'}
           >
-            {isPlaying ? (
+            {isBuffering ? (
+              <Loader2 className="w-5 h-5 animate-spin text-amber-400" />
+            ) : isPlaying ? (
               <Pause className="w-5 h-5 fill-current" />
             ) : (
               <Play className="w-5 h-5 fill-current ml-0.5" />

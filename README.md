@@ -13,12 +13,15 @@ Unlike typical text-to-speech tools that strip away layout and dump text into a 
 - **Persistent Library & Reading Progress**: Upload PDFs directly to a local dashboard. The app securely stores them on your machine using SQLite and automatically remembers the exact page you last read so you can resume instantly.
 - **Explicit Bookmarking System**: Save important references, diagrams, and code snippets across your reading. Quickly jump back to key concepts via the unified sidebar tab, independent of your active reading progress.
 - **Word-Level Synchronized TTS Highlighting**: Words on the PDF canvas light up in real-time in exact lockstep with spoken audio using sub-millisecond audio timestamps.
-- **Free Edge Neural TTS Out-of-the-Box**: Powered by Microsoft Edge Neural voices (no API keys, subscriptions, or credit cards required), with optional ElevenLabs integration for custom cloned voices.
+- **Robust Playback Engine & Spam Protection**: Hardened against rapid user interactions (Prev/Next spam, pause during buffer) using monotonic playback generation tickets (`playbackEpochRef`), debounced buffering indicators, and clean prefetch cache isolation.
+- **Network Resilience & Circuit Breaker**: Gracefully handles network disconnects and offline mode with a non-intrusive error banner and one-click Retry button instead of silent skipping loops.
+- **Free Edge Neural TTS Out-of-the-Box**: Powered by Microsoft Edge Neural voices (no API keys, subscriptions, or credit cards required), with optional ElevenLabs integration for custom cloned voices. Adaptive streaming timeouts dynamically support full-length code listings (40s+ speech) without truncation.
 - **Academic & Technical Layout Intelligence**:
-  - **C / Monospace Code Listings**: Accurately distinguished from prose; reads either literally word-by-word with code highlights or summarized as code references.
+  - **C / Monospace Code Listings**: Accurately distinguished from prose; reads either literally word-by-word with code highlights or summarized as code references. Preserves operators (`!=`, `->`, `<=`, etc.) with natural spoken translations.
   - **Running Headers & Footers**: Automatically identifies and filters out repetitive book titles, chapter banners, and page numbers so narration flows uninterrupted.
   - **Paragraph Segmentation**: Distinguishes distinct prose paragraphs using indentation and line-spacing heuristics rather than arbitrarily grouping whole pages.
   - **Figures, Captions & Math**: Detects captions (`Figure 2.1: ...`) and standalone equation blocks.
+- **Canvas Rendering Stability**: Uses isolated per-page canvas rendering, dirty transformation matrix resets, and bundled local CMaps and standard font assets to eliminate mirroring and inverted font artifacts.
 - **All-in-One Control Sidebar**: Consolidated controls including Play/Pause hero, speed pills (`0.8x` to `2.0x`), neural voice selector, volume, page navigation, zoom with **Fit to Width** & **Fit to Page**, block outline navigator, and page thumbnails.
 - **Collapsible Rail Mode**: Collapse the sidebar to a slim 56px icon rail anytime you want maximum horizontal canvas space.
 - **Discreet Document Title Tag**: Small, unobtrusive browser hyperlink-style badge pinned to the bottom-right corner showing `filename • Page X of Y`.
@@ -160,7 +163,7 @@ This compiles both the server TypeScript and the client Vite bundle into optimiz
 
 ## Automated Testing Suite
 
-The repository includes a comprehensive, professional-grade test suite covering layout analysis, study settings filtering, token alignment synchronization, and SSML sanitization:
+The repository includes a comprehensive, 42-test automated suite covering layout analysis, study settings filtering, token alignment synchronization, and SSML sanitization:
 
 ```bash
 npm run test
@@ -169,7 +172,7 @@ npm run test
 - **Study Settings Filter Tests** (`studySettings.test.ts`): Proves complete independence of all 10 study settings toggles (page numbers, headers, footers, code skipping, captions, equations).
 - **Layout Engine Tests** (`layoutAnalysis.test.ts`): Validates heading detection, C program parsing, caption distinguishing vs. prose, and diagram arrows.
 - **Word-Level Highlighting Tests** (`textMapping.test.ts`): Validates priority matching, hyphenation resolution, and 1-to-1 SSML token alignment.
-- **Backend SSML Tests** (`edgeTts.test.ts`): Validates XML entity safety, mathematical arrow conversion, and empty/symbol block handling.
+- **Backend SSML & Synthesis Tests** (`edgeTts.test.ts`): Validates XML entity safety, mathematical arrow and inequality conversion, and empty/symbol block handling.
 
 ---
 

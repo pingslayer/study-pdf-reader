@@ -141,8 +141,10 @@ app.post('/api/tts', async (req, res) => {
       res.json(result);
     }
   } catch (error: any) {
-    console.error('Error generating TTS:', error);
-    res.status(500).json({ error: error.message || 'TTS generation failed' });
+    console.error('Error generating TTS:', error.message || error);
+    const msg = error.message || '';
+    const isNetworkError = msg.includes('internet') || msg.includes('unreachable') || msg.includes('Network') || msg.includes('timed out') || error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED';
+    res.status(isNetworkError ? 503 : 500).json({ error: msg || 'TTS generation failed' });
   }
 });
 

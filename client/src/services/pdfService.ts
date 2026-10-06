@@ -14,13 +14,20 @@ export class PDFService {
   public async loadDocument(source: string | ArrayBuffer | Uint8Array): Promise<number> {
     this.pageLayoutCache.clear();
     
-    let loadingTask: pdfjsLib.PDFDocumentLoadingTask;
+    const docInitParams: any = {
+      cMapUrl: '/cmaps/',
+      cMapPacked: true,
+      standardFontDataUrl: '/standard_fonts/',
+      enableXfa: false,
+    };
+
     if (typeof source === 'string') {
-      loadingTask = pdfjsLib.getDocument({ url: source });
+      docInitParams.url = source;
     } else {
-      loadingTask = pdfjsLib.getDocument({ data: source });
+      docInitParams.data = source;
     }
 
+    const loadingTask = pdfjsLib.getDocument(docInitParams);
     this.pdfDoc = await loadingTask.promise;
     return this.pdfDoc.numPages;
   }
@@ -29,12 +36,27 @@ export class PDFService {
     return this.pdfDoc?.numPages || 0;
   }
 
+  private currentRenderTask: any = null;
+
   public async renderPageToCanvas(
     pageNumber: number,
     canvas: HTMLCanvasElement,
     scale: number
   ): Promise<{ width: number; height: number }> {
     if (!this.pdfDoc) throw new Error('No PDF document loaded');
+
+    // Ensure all font faces registered in the document have resolved
+    if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+      await document.fonts.ready;
+    }
+
+    // Cancel previous in-flight canvas render task if user rapidly zoomed or flipped page
+    if (this.currentRenderTask) {
+      try {
+        this.currentRenderTask.cancel();
+      } catch {}
+      this.currentRenderTask = null;
+    }
 
     const page = await this.pdfDoc.getPage(pageNumber);
     const dpr = window.devicePixelRatio || 1;
@@ -48,8 +70,10 @@ export class PDFService {
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) throw new Error('Could not get 2d context from canvas');
 
-    ctx.save();
-    // Clear canvas
+    // Explicitly reset transformation matrix to identity before any draw operations
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    // Clear canvas with white background
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -58,8 +82,25 @@ export class PDFService {
       viewport: viewport,
     };
 
-    await page.render(renderContext).promise;
-    ctx.restore();
+    const task = page.render(renderContext);
+    this.currentRenderTask = task;
+
+    try {
+      await task.promise;
+    } catch (err: any) {
+      if (err?.name === 'RenderingCancelledException') {
+        // Ignored: expected cancellation during rapid user interaction
+        return {
+          width: viewport.width / dpr,
+          height: viewport.height / dpr,
+        };
+      }
+      throw err;
+    } finally {
+      if (this.currentRenderTask === task) {
+        this.currentRenderTask = null;
+      }
+    }
 
     return {
       width: viewport.width / dpr,

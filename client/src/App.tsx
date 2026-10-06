@@ -1,39 +1,15 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { AlertCircle, X } from 'lucide-react';
 import { Sidebar } from './components/Sidebar';
 import { PDFViewer } from './components/PDFViewer/PDFViewer';
 import { StudySettingsModal } from './components/Controls/StudySettingsModal';
 import { ApiKeyModal } from './components/Controls/ApiKeyModal';
-import { PageLayoutData, PDFBlock, StudySettings, BoundingBox } from './types/pdf';
+import { PageLayoutData, StudySettings } from './types/pdf';
 import { pdfService } from './services/pdfService';
 import { Library, Document } from './components/Library';
-import { ttsPlayer, TTSClientResponse } from './services/ttsClient';
-import {
-  buildVisualTokensFromBlock,
-  buildVisualTokensFromAlignment,
-  findMatchingVisualToken,
-  VisualToken,
-} from './services/textMapping';
-import { isBlockReadable, filterReadableBlocks } from './services/studySettings';
-
-function getSpokenTextForBlock(
-  block: PDFBlock,
-  settings: StudySettings,
-  visualTokens?: VisualToken[]
-): string {
-  if (block.type === 'code') {
-    if (settings.readCodeLiterally) {
-      return visualTokens && visualTokens.length > 0
-        ? visualTokens.map((vt) => vt.word).join(' ')
-        : block.text.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
-    } else {
-      return 'Code example. ' + (block.languageHint ? `${block.languageHint} code.` : '');
-    }
-  }
-  if (visualTokens && visualTokens.length > 0) {
-    return visualTokens.map((vt) => vt.word).join(' ');
-  }
-  return block.text.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
-}
+import { ttsPlayer } from './services/ttsClient';
+import { filterReadableBlocks } from './services/studySettings';
+import { usePlaybackEngine } from './hooks/usePlaybackEngine';
 
 export const App: React.FC = () => {
   // Document state
@@ -76,27 +52,53 @@ export const App: React.FC = () => {
     readCodeLiterally: true, // Reads code line-by-line with word highlights continuously
   });
 
-  // Playback & Highlighting State
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [activeBlock, setActiveBlock] = useState<PDFBlock | null>(null);
-  const [activeHighlight, setActiveHighlight] = useState<BoundingBox | null>(null);
   const [speed, setSpeed] = useState(1.0);
   const [volume, setVolume] = useState(1.0);
 
-  // References for active playback loop
-  const visualTokensRef = useRef<VisualToken[]>([]);
-  const lastMatchedTokenIndexRef = useRef<number>(0);
-  const isPlayingRef = useRef(false);
-  isPlayingRef.current = isPlaying;
+  // Filter readable blocks on current page based on active study settings
+  const readableBlocks = useMemo(() => {
+    if (!currentPageLayout) return [];
+    return filterReadableBlocks(currentPageLayout.blocks, studySettings);
+  }, [currentPageLayout, studySettings]);
 
-  // Background prefetch cache: maps "blockId:voiceId" to in-flight or resolved TTS Promise
-  const prefetchCacheRef = useRef<Map<string, Promise<TTSClientResponse>>>(new Map());
+  // Sync reading progress to SQLite library database
+  const syncProgress = useCallback(
+    (page: number) => {
+      if (activeDocument) {
+        fetch(`http://localhost:3001/api/library/${activeDocument.id}/progress`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ last_read_page: page }),
+        }).catch(console.error);
+      }
+    },
+    [activeDocument]
+  );
 
-  // Always-current refs so stale closures inside audio callbacks can call
-  // the latest version of these functions without being re-created every render.
-  const handleNextBlockRef = useRef<() => void>(() => {});
-  const playBlockNarrationRef = useRef<(block: PDFBlock) => void>(() => {});
-  const isAtBlockEndRef = useRef(false);
+  // Page navigation
+  const handlePageChange = useCallback(
+    (page: number) => {
+      if (page >= 1 && page <= numPages) {
+        playback.resetPlayback();
+        setCurrentPage(page);
+        syncProgress(page);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [numPages, syncProgress]
+  );
+
+  // Centralized Playback Engine (Strict FSM, Dual-Clock Sync, and Epoch Protection)
+  const playback = usePlaybackEngine({
+    readableBlocks,
+    selectedVoice,
+    speed,
+    volume,
+    studySettings,
+    currentPage,
+    numPages,
+    onPageChange: handlePageChange,
+  });
 
   // Check backend health & voices on mount
   useEffect(() => {
@@ -138,66 +140,59 @@ export const App: React.FC = () => {
   }, []);
 
   // Load initial sample document
-  
-  const loadLibraryDocument = useCallback(async (doc: Document) => {
-    try {
-      const res = await fetch(`http://localhost:3001/api/library/${doc.id}/file`);
-      if (!res.ok) throw new Error('Failed to load file');
-      const buffer = await res.arrayBuffer();
-      
-      ttsPlayer.stop();
-      setIsPlaying(false);
-      setActiveBlock(null);
-      setActiveHighlight(null);
-      
-      const total = await pdfService.loadDocument(buffer);
-      setNumPages(total);
-      setFileName(doc.original_name);
-      
-      const startPage = Math.min(Math.max(1, doc.last_read_page), total);
-      setCurrentPage(startPage);
-      
-      const layout = await pdfService.getPageLayout(startPage);
-      setCurrentPageLayout(layout);
-      
-      setActiveDocument(doc);
-    } catch (err) {
-      console.error('Failed to load PDF document:', err);
-      alert('Failed to load PDF document: ' + (err as any).message);
-    }
-  }, []);
+  const loadLibraryDocument = useCallback(
+    async (doc: Document) => {
+      playback.resetPlayback();
 
-  const loadDocumentFromSource = useCallback(async (source: string | ArrayBuffer, name: string) => {
-    try {
-      ttsPlayer.stop();
-      setIsPlaying(false);
-      setActiveBlock(null);
-      setActiveHighlight(null);
+      try {
+        const res = await fetch(`http://localhost:3001/api/library/${doc.id}/file`);
+        if (!res.ok) throw new Error('Failed to load file');
+        const buffer = await res.arrayBuffer();
 
-      const total = await pdfService.loadDocument(source);
-      setNumPages(total);
-      setFileName(name);
-      setCurrentPage(1);
+        const total = await pdfService.loadDocument(buffer);
+        setNumPages(total);
+        setFileName(doc.original_name);
 
-      // Load layout for page 1
-      const layout = await pdfService.getPageLayout(1);
-      setCurrentPageLayout(layout);
-    } catch (err) {
-      console.error('Failed to load PDF document:', err);
-      alert('Failed to load PDF document: ' + (err as any).message);
-    }
-  }, []);
+        const startPage = Math.min(Math.max(1, doc.last_read_page), total);
+        setCurrentPage(startPage);
 
-  
+        const layout = await pdfService.getPageLayout(startPage);
+        setCurrentPageLayout(layout);
+
+        setActiveDocument(doc);
+      } catch (err) {
+        console.error('Failed to load PDF document:', err);
+        alert('Failed to load PDF document: ' + (err as any).message);
+      }
+    },
+    [playback]
+  );
+
+  const loadDocumentFromSource = useCallback(
+    async (source: string | ArrayBuffer, name: string) => {
+      playback.resetPlayback();
+
+      try {
+        const total = await pdfService.loadDocument(source);
+        setNumPages(total);
+        setFileName(name);
+        setCurrentPage(1);
+
+        const layout = await pdfService.getPageLayout(1);
+        setCurrentPageLayout(layout);
+      } catch (err) {
+        console.error('Failed to load PDF document:', err);
+        alert('Failed to load PDF document: ' + (err as any).message);
+      }
+    },
+    [playback]
+  );
 
   // Load layout whenever current page changes
   useEffect(() => {
     if (currentPage > 0 && numPages > 0) {
       pdfService.getPageLayout(currentPage).then((layout) => {
         setCurrentPageLayout(layout);
-        // Clear highlight if on a different page unless activeBlock is on this page
-        setActiveBlock((prev) => (prev && prev.page === currentPage ? prev : null));
-        setActiveHighlight((prev) => (prev ? null : null));
       });
     }
   }, [currentPage, numPages]);
@@ -222,281 +217,14 @@ export const App: React.FC = () => {
     loadDocumentFromSource('/samples/ostep_sample.pdf', 'OSTEP_Chapter4_Processes.pdf');
   };
 
-  // Select a block
-  const handleSelectBlock = useCallback((block: PDFBlock) => {
-    isAtBlockEndRef.current = false;
-    setActiveBlock(block);
-    visualTokensRef.current = buildVisualTokensFromBlock(block);
-    lastMatchedTokenIndexRef.current = 0;
-    // Highlight the whole block immediately
-    setActiveHighlight(block.bbox);
-  }, []);
-
-  // Get readable blocks on current page based on study settings
-  const getReadableBlocks = useCallback(() => {
-    if (!currentPageLayout) return [];
-    return currentPageLayout.blocks.filter((b) => isBlockReadable(b, studySettings));
-  }, [currentPageLayout, studySettings]);
-
-  // Play narration of a specific block
-  const playBlockNarration = useCallback(
-    async (block: PDFBlock) => {
-      handleSelectBlock(block);
-      setIsPlaying(true);
-
-      const spokenText = getSpokenTextForBlock(block, studySettings, visualTokensRef.current);
-
-      try {
-        const cacheKey = `${block.id}:${selectedVoice}`;
-        let ttsPromise = prefetchCacheRef.current.get(cacheKey);
-        if (!ttsPromise) {
-          ttsPromise = ttsPlayer.fetchTTS(spokenText, selectedVoice);
-        }
-        // Remove used entry from cache
-        prefetchCacheRef.current.delete(cacheKey);
-
-        const ttsData = await ttsPromise;
-
-        // Ground-Truth Synchronization:
-        // Build visual tokens directly from the TTS alignment words so that the screen's
-        // token list matches the spoken audio stream with 100% mathematical precision.
-        if (ttsData.alignment && ttsData.alignment.length > 0) {
-          visualTokensRef.current = buildVisualTokensFromAlignment(block, ttsData.alignment);
-          lastMatchedTokenIndexRef.current = 0;
-        }
-
-        // Sliding Window Background Prefetch: quietly buffer up to 2 readable blocks ahead
-        // sequentially to ensure short blocks never cause lag, without spamming parallel connections.
-        const readable = getReadableBlocks();
-        const currIdx = readable.findIndex((b) => b.id === block.id);
-        const upcomingBlocks = currIdx >= 0 ? readable.slice(currIdx + 1, currIdx + 1 + 2) : [];
-
-        if (upcomingBlocks.length > 0) {
-          (async () => {
-            for (const b of upcomingBlocks) {
-              if (!isPlayingRef.current) break;
-              const nextKey = `${b.id}:${selectedVoice}`;
-              if (prefetchCacheRef.current.has(nextKey)) continue;
-
-              const nextTokens = buildVisualTokensFromBlock(b);
-              const nextSpokenText = getSpokenTextForBlock(b, studySettings, nextTokens);
-              if (!nextSpokenText || nextSpokenText.trim().length === 0) continue;
-
-              try {
-                const nextPromise = ttsPlayer.fetchTTS(nextSpokenText, selectedVoice);
-                prefetchCacheRef.current.set(nextKey, nextPromise);
-
-                // Maintain max cache size of 15
-                if (prefetchCacheRef.current.size > 15) {
-                  const firstKey = prefetchCacheRef.current.keys().next().value;
-                  if (firstKey) prefetchCacheRef.current.delete(firstKey);
-                }
-
-                // Await this block before requesting the next to keep network concurrency safe (1 at a time)
-                await nextPromise;
-              } catch (err) {
-                console.warn('Background prefetch failed for block:', b.id, err);
-                prefetchCacheRef.current.delete(nextKey);
-              }
-            }
-          })();
-        }
-
-        ttsPlayer.playWithAlignment(
-          ttsData,
-          spokenText,
-          speed,
-          volume,
-          (word: string, wordIndex: number, charIndex?: number) => {
-            const match = findMatchingVisualToken(
-              word,
-              visualTokensRef.current,
-              lastMatchedTokenIndexRef.current,
-              charIndex,
-              wordIndex
-            );
-
-            if (match) {
-              lastMatchedTokenIndexRef.current = match.index;
-              setActiveHighlight(match.token.bbox);
-            }
-          },
-          () => {
-            // Finished current block — use ref so this always calls the
-            // latest handleNextBlock even though this closure was created
-            // when the block started playing (stale closure fix).
-            if (!isPlayingRef.current) return;
-            isAtBlockEndRef.current = true;
-
-            // Look up the next block so we can decide whether to pause.
-            // We only pause at the END of a code section (when the next block
-            // is not also code), so a C program split across several blocks
-            // flows continuously rather than stopping after the first chunk.
-            const readableForPause = getReadableBlocks();
-            const cIdx = readableForPause.findIndex((b) => b.id === block.id);
-            const nBlock = cIdx >= 0 ? readableForPause[cIdx + 1] : undefined;
-
-            if (studySettings.pauseAtCode && block.type === 'code' && nBlock?.type !== 'code') {
-              setIsPlaying(false);
-              return;
-            }
-            if (studySettings.pauseAtFigure && (block.type === 'caption' || block.type === 'figure')) {
-              setIsPlaying(false);
-              return;
-            }
-            if (studySettings.pauseAtHeading && block.type === 'heading') {
-              setIsPlaying(false);
-              return;
-            }
-
-            // Always-current via ref — never stale
-            handleNextBlockRef.current();
-          }
-        );
-      } catch (err: any) {
-        console.warn('TTS block generation failed, skipping to next block:', err);
-        if (isPlayingRef.current) {
-          setTimeout(() => {
-            if (isPlayingRef.current) {
-              handleNextBlockRef.current();
-            }
-          }, 80);
-        } else {
-          setIsPlaying(false);
-        }
-      }
-    },
-    [handleSelectBlock, getReadableBlocks, selectedVoice, speed, volume, studySettings]
-  );
-
-  // Play button clicked
-  const handlePlay = useCallback(() => {
-    // If paused mid-sentence on active block, resume immediately from the exact word
-    if (activeBlock && ttsPlayer.canResume()) {
-      setIsPlaying(true);
-      ttsPlayer.resume();
-      return;
-    }
-
-    const readable = getReadableBlocks();
-    if (readable.length === 0) return;
-
-    // If playback was paused at the end of a block (e.g. via pauseAtHeading/Code/Figure),
-    // pressing play advances to the next block instead of repeating the finished block.
-    if (activeBlock && isAtBlockEndRef.current) {
-      handleNextBlockRef.current();
-      return;
-    }
-
-    if (activeBlock) {
-      playBlockNarration(activeBlock);
-    } else {
-      playBlockNarration(readable[0]);
-    }
-  }, [getReadableBlocks, activeBlock, playBlockNarration]);
-
-  // Pause
-  const handlePause = useCallback(() => {
-    setIsPlaying(false);
-    ttsPlayer.pause();
-  }, []);
-
-  // Stop
-  const handleStop = useCallback(() => {
-    setIsPlaying(false);
-    isAtBlockEndRef.current = false;
-    prefetchCacheRef.current.clear();
-    ttsPlayer.stop();
-    setActiveHighlight(null);
-  }, []);
-
-  // Advance to next block
-  const handleNextBlock = useCallback(() => {
-    const readable = getReadableBlocks();
-    if (readable.length === 0) return;
-
-    if (!activeBlock) {
-      playBlockNarrationRef.current(readable[0]);
-      return;
-    }
-
-    const currentIndex = readable.findIndex((b) => b.id === activeBlock.id);
-    if (currentIndex >= 0 && currentIndex + 1 < readable.length) {
-      playBlockNarrationRef.current(readable[currentIndex + 1]);
-    } else if (currentPage < numPages) {
-      // Advance to next page
-      const nextPage = currentPage + 1;
-      setCurrentPage(nextPage);
-      pdfService.getPageLayout(nextPage).then((layout) => {
-        setCurrentPageLayout(layout);
-        const nextReadable = filterReadableBlocks(layout.blocks, studySettings);
-        if (nextReadable.length > 0 && isPlayingRef.current) {
-          playBlockNarrationRef.current(nextReadable[0]);
-        }
-      });
-    } else {
-      // End of document
-      setIsPlaying(false);
-      ttsPlayer.stop();
-    }
-  }, [getReadableBlocks, studySettings, activeBlock, currentPage, numPages]);
-
-  // Keep refs current every render so onEnded closures always have the latest functions
-  playBlockNarrationRef.current = playBlockNarration;
-  handleNextBlockRef.current = handleNextBlock;
-
-  // Back to previous block
-  const handlePrevBlock = useCallback(() => {
-    const readable = getReadableBlocks();
-    if (readable.length === 0) return;
-
-    if (!activeBlock) {
-      handleSelectBlock(readable[0]);
-      return;
-    }
-
-    const currentIndex = readable.findIndex((b) => b.id === activeBlock.id);
-    if (currentIndex > 0) {
-      const prev = readable[currentIndex - 1];
-      if (isPlaying) {
-        playBlockNarration(prev);
-      } else {
-        handleSelectBlock(prev);
-      }
-    }
-  }, [getReadableBlocks, activeBlock, isPlaying, playBlockNarration, handleSelectBlock]);
-
-  const syncProgress = useCallback((page: number) => {
-    if (activeDocument) {
-      fetch(`http://localhost:3001/api/library/${activeDocument.id}/progress`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ last_read_page: page }),
-      }).catch(console.error);
-    }
-  }, [activeDocument]);
-
-  // Page navigation
-  const handlePageChange = useCallback(
-    (page: number) => {
-      if (page >= 1 && page <= numPages) {
-        ttsPlayer.stop();
-        setIsPlaying(false);
-        setActiveBlock(null);
-        setActiveHighlight(null);
-        prefetchCacheRef.current.clear();
-        setCurrentPage(page);
-        syncProgress(page);
-      }
-    },
-    [numPages, syncProgress]
-  );
-
   // Voice change with cache invalidation
-  const handleVoiceChange = useCallback((newVoice: string) => {
-    prefetchCacheRef.current.clear();
-    setSelectedVoice(newVoice);
-  }, []);
+  const handleVoiceChange = useCallback(
+    (newVoice: string) => {
+      playback.clearPrefetchCache();
+      setSelectedVoice(newVoice);
+    },
+    [playback]
+  );
 
   // Speed change
   const handleSpeedChange = (newSpeed: number) => {
@@ -528,15 +256,21 @@ export const App: React.FC = () => {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Do not trigger if typing in an input
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+      if (
+        document.activeElement?.tagName === 'INPUT' ||
+        document.activeElement?.tagName === 'TEXTAREA' ||
+        document.activeElement?.getAttribute('contenteditable') === 'true'
+      ) {
         return;
       }
 
       if (e.code === 'Space') {
         e.preventDefault();
-        if (isPlaying) handlePause();
-        else handlePlay();
+        if (playback.isPlaying || playback.isBuffering) {
+          playback.pause();
+        } else {
+          playback.play();
+        }
       } else if (e.code === 'ArrowLeft') {
         e.preventDefault();
         handlePageChange(currentPage - 1);
@@ -550,20 +284,15 @@ export const App: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isPlaying, handlePause, handlePlay, handlePageChange, currentPage]);
+  }, [playback, handlePageChange, currentPage]);
 
-  const readableBlocks = getReadableBlocks();
-  const currentBlockIndex = activeBlock
-    ? readableBlocks.findIndex((b) => b.id === activeBlock.id)
+  const currentBlockIndex = playback.activeBlock
+    ? readableBlocks.findIndex((b) => b.id === playback.activeBlock?.id)
     : -1;
-
 
   // Back to Library
   const handleBackToLibrary = () => {
-    ttsPlayer.stop();
-    setIsPlaying(false);
-    setActiveBlock(null);
-    prefetchCacheRef.current.clear();
+    playback.stop();
     setActiveDocument(null);
   };
 
@@ -580,19 +309,20 @@ export const App: React.FC = () => {
         onOpenSettings={() => setSettingsOpen(true)}
         isBackendConnected={isBackendConnected}
         activeProvider={activeProvider}
-        isPlaying={isPlaying}
+        isPlaying={playback.isPlaying}
+        isBuffering={playback.isBuffering}
         speed={speed}
         volume={volume}
         selectedVoice={selectedVoice}
         availableVoices={availableVoices}
-        activeBlock={activeBlock}
+        activeBlock={playback.activeBlock}
         totalBlocks={readableBlocks.length}
         currentBlockIndex={currentBlockIndex}
-        onPlay={handlePlay}
-        onPause={handlePause}
-        onStop={handleStop}
-        onPrevBlock={handlePrevBlock}
-        onNextBlock={handleNextBlock}
+        onPlay={playback.play}
+        onPause={playback.pause}
+        onStop={playback.stop}
+        onPrevBlock={playback.prevBlock}
+        onNextBlock={playback.nextBlock}
         onSpeedChange={handleSpeedChange}
         onVoiceChange={handleVoiceChange}
         onVolumeChange={handleVolumeChange}
@@ -604,18 +334,36 @@ export const App: React.FC = () => {
         onFitWidth={handleFitWidth}
         onFitPage={handleFitPage}
         currentPageLayout={currentPageLayout}
-        onSelectBlock={(b) => {
-          if (isPlaying) {
-            playBlockNarration(b);
-          } else {
-            handleSelectBlock(b);
-          }
-        }}
+        onSelectBlock={playback.selectBlock}
         isOpen={sidebarOpen}
         onToggleOpen={() => setSidebarOpen(!sidebarOpen)}
         onBackToLibrary={handleBackToLibrary}
         activeDocumentId={activeDocument?.id || null}
       />
+
+      {/* Network / Offline Error Notification Banner */}
+      {playback.networkError && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex items-center space-x-3 bg-rose-950/95 border border-rose-500/60 text-rose-200 px-4 py-2.5 rounded-xl shadow-2xl backdrop-blur-md text-xs animate-in fade-in slide-in-from-top-2 duration-200 select-none">
+          <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+          <span className="font-medium max-w-md truncate">{playback.networkError}</span>
+          <button
+            onClick={() => {
+              playback.clearError();
+              playback.play();
+            }}
+            className="px-2.5 py-1 bg-rose-700 hover:bg-rose-600 active:scale-95 text-white rounded-md font-semibold transition shadow-sm ml-1 shrink-0"
+          >
+            Retry
+          </button>
+          <button
+            onClick={playback.clearError}
+            className="p-1 text-rose-400 hover:text-white transition ml-1 shrink-0"
+            title="Dismiss"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* 100% Vertical Height Unobstructed PDF Viewport */}
       <PDFViewer
@@ -623,17 +371,11 @@ export const App: React.FC = () => {
         currentPage={currentPage}
         numPages={numPages}
         currentPageLayout={currentPageLayout}
-        activeBlock={activeBlock}
-        activeHighlight={activeHighlight}
+        activeBlock={playback.activeBlock}
+        activeHighlight={playback.activeHighlight}
         inspectorMode={inspectorMode}
         scale={scale}
-        onSelectBlock={(b) => {
-          if (isPlaying) {
-            playBlockNarration(b);
-          } else {
-            handleSelectBlock(b);
-          }
-        }}
+        onSelectBlock={playback.selectBlock}
       />
 
       {/* Study Settings Modal */}

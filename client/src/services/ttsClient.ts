@@ -15,6 +15,20 @@ export class TTSPlayer {
   private audioElement: HTMLAudioElement | null = null;
   private animFrameId: number | null = null;
   private isPlaying: boolean = false;
+  private timeTickCallback: (() => void) | null = null;
+
+  constructor() {
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && this.isPlaying && this.timeTickCallback) {
+          this.timeTickCallback();
+          if (!this.animFrameId && this.audioElement && !this.audioElement.paused) {
+            this.animFrameId = requestAnimationFrame(this.timeTickCallback);
+          }
+        }
+      });
+    }
+  }
 
   public async fetchTTS(text: string, voiceId?: string): Promise<TTSClientResponse> {
     const response = await fetch('/api/tts', {
@@ -26,8 +40,8 @@ export class TTSPlayer {
     });
 
     if (!response.ok) {
-      const err = await response.json().catch(() => ({ error: 'Failed to generate speech' }));
-      throw new Error(err.error || 'ElevenLabs TTS generation failed');
+      const err = await response.json().catch(() => ({ error: 'Speech service unreachable' }));
+      throw new Error(err.error || `Voice synthesis failed (${response.status})`);
     }
 
     return await response.json();
@@ -39,20 +53,21 @@ export class TTSPlayer {
     speed: number,
     volume: number,
     onWordSpoken: (word: string, wordIndex: number, charIndex?: number) => void,
-    onEnded: () => void
+    onEnded: () => void,
+    onError?: (error: any) => void
   ) {
     this.stop();
+    this.isPlaying = true;
 
     if (!ttsData.audioUrl || ttsData.audioUrl.length === 0) {
       setTimeout(() => {
         if (this.isPlaying) {
+          this.stop();
           onEnded();
         }
       }, 60);
       return;
     }
-
-    this.isPlaying = true;
     const audio = new Audio(ttsData.audioUrl);
     this.audioElement = audio;
     audio.playbackRate = speed;
@@ -61,10 +76,10 @@ export class TTSPlayer {
     let lastReportedIndex = -1;
 
     const checkTime = () => {
-      if (!this.isPlaying) return;
+      if (!this.isPlaying || !this.audioElement) return;
       const current = audio.currentTime;
 
-      // Find active word in alignment directly from ElevenLabs hardware audio time
+      // Find active word in alignment directly from hardware audio time
       for (let i = 0; i < ttsData.alignment.length; i++) {
         const item = ttsData.alignment[i];
         if (current >= item.start && current <= item.end) {
@@ -81,8 +96,16 @@ export class TTSPlayer {
       }
     };
 
+    this.timeTickCallback = checkTime;
+
     audio.onplay = () => {
-      this.animFrameId = requestAnimationFrame(checkTime);
+      if (!this.animFrameId) {
+        this.animFrameId = requestAnimationFrame(checkTime);
+      }
+    };
+
+    audio.ontimeupdate = () => {
+      checkTime();
     };
 
     audio.onended = () => {
@@ -91,15 +114,16 @@ export class TTSPlayer {
     };
 
     audio.onerror = (err) => {
-      console.error('ElevenLabs audio playback failed:', err);
+      console.error('TTS audio playback error:', err);
       this.stop();
-      onEnded();
+      if (onError) onError(err);
     };
 
     audio.play().catch((err) => {
-      console.error('ElevenLabs audio playback failed to start:', err);
+      if (err.name === 'AbortError') return; // User paused or stopped before playback started
+      console.error('TTS audio playback failed to start:', err);
       this.stop();
-      onEnded();
+      if (onError) onError(err);
     });
   }
 
@@ -115,9 +139,21 @@ export class TTSPlayer {
   public resume(): boolean {
     if (this.canResume() && this.audioElement) {
       this.isPlaying = true;
-      this.audioElement.play().catch((err) => {
-        console.error('Failed to resume audio playback:', err);
-      });
+      if (this.timeTickCallback) {
+        this.timeTickCallback();
+      }
+      this.audioElement
+        .play()
+        .then(() => {
+          if (this.isPlaying && this.timeTickCallback && !this.animFrameId) {
+            this.animFrameId = requestAnimationFrame(this.timeTickCallback);
+          }
+        })
+        .catch((err) => {
+          if (err.name !== 'AbortError') {
+            console.error('Failed to resume audio playback:', err);
+          }
+        });
       return true;
     }
     return false;
@@ -136,9 +172,12 @@ export class TTSPlayer {
 
   public stop() {
     this.isPlaying = false;
+    this.timeTickCallback = null;
     if (this.audioElement) {
       this.audioElement.pause();
       this.audioElement.currentTime = 0;
+      this.audioElement.removeAttribute('src');
+      this.audioElement.load(); // Release decoded audio buffer from browser memory
       this.audioElement = null;
     }
     if (this.animFrameId) {

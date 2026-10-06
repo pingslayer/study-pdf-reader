@@ -36,6 +36,12 @@ lerna-debug.log*
 
 # Scratch & Temporary Testing Scripts
 scratch/
+*.patch
+*.diff
+
+# Test Coverage
+coverage/
+.nyc_output/
 
 # Operating System Files
 .DS_Store

@@ -49,6 +49,21 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
         if (!isCancelled) {
           setRenderedDimensions(dims);
         }
+
+        // Font readiness check: if embedded fonts were being processed by the browser
+        // during canvas drawing, wait for document.fonts.ready and refresh canvas so
+        // glyphs and character maps never appear inverted or garbled.
+        if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+          if (document.fonts.status === 'loading') {
+            await document.fonts.ready;
+            if (!isCancelled && canvasRef.current) {
+              const refreshedDims = await pdfService.renderPageToCanvas(currentPage, canvasRef.current, scale);
+              if (!isCancelled) {
+                setRenderedDimensions(refreshedDims);
+              }
+            }
+          }
+        }
       } catch (err) {
         console.error('Failed to render PDF page:', err);
       } finally {
@@ -63,7 +78,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [currentPage, scale, numPages]);
+  }, [currentPage, scale, numPages, fileName]);
 
   return (
     <div className="flex-1 h-full bg-zinc-950 overflow-hidden relative">
@@ -73,8 +88,12 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
         className="h-full w-full overflow-auto py-8 px-6 flex justify-center items-start relative select-none"
       >
         <div className="relative shadow-2xl rounded-sm border border-zinc-800/80 bg-white">
-          {/* Canvas Rendering the Original PDF Page */}
-          <canvas ref={canvasRef} className="block shadow-xl rounded-sm" />
+          {/* Fresh canvas element per document and page to prevent dirty context matrix reuse */}
+          <canvas
+            key={`canvas-${fileName}-${currentPage}`}
+            ref={canvasRef}
+            className="block shadow-xl rounded-sm"
+          />
 
           {/* Synchronized Highlighting Layer */}
           <HighlightLayer

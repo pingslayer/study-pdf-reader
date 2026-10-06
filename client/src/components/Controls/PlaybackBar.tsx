@@ -10,7 +10,8 @@ import {
   Mic, 
   FastForward,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Loader2,
 } from 'lucide-react';
 import { PDFBlock } from '../../types/pdf';
 
@@ -21,6 +22,7 @@ interface Voice {
 
 interface PlaybackBarProps {
   isPlaying: boolean;
+  isBuffering?: boolean;
   speed: number;
   volume: number;
   selectedVoice: string;
@@ -44,6 +46,7 @@ const playbackSpeeds = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
 
 export const PlaybackBar: React.FC<PlaybackBarProps> = ({
   isPlaying,
+  isBuffering = false,
   speed,
   volume,
   selectedVoice,
@@ -84,11 +87,21 @@ export const PlaybackBar: React.FC<PlaybackBarProps> = ({
 
         {/* Play/Pause Button */}
         <button
-          onClick={isPlaying ? onPause : onPlay}
-          className="w-10 h-10 rounded-full bg-sky-600 hover:bg-sky-500 active:scale-95 text-white flex items-center justify-center shadow-lg shadow-sky-600/30 transition"
-          title={isPlaying ? 'Pause Narration (Space)' : 'Play Narration (Space)'}
+          onClick={isPlaying || isBuffering ? onPause : onPlay}
+          className={`w-10 h-10 rounded-full flex items-center justify-center shadow-lg transition ${
+            isBuffering
+              ? 'bg-slate-800 text-sky-400 border border-sky-500/50 shadow-sky-500/20 animate-pulse hover:bg-slate-700'
+              : 'bg-sky-600 hover:bg-sky-500 active:scale-95 text-white shadow-sky-600/30'
+          }`}
+          title={isBuffering ? 'Buffering Audio (Click to Cancel)...' : isPlaying ? 'Pause Narration (Space)' : 'Play Narration (Space)'}
         >
-          {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-0.5" />}
+          {isBuffering ? (
+            <Loader2 className="w-5 h-5 animate-spin text-sky-400" />
+          ) : isPlaying ? (
+            <Pause className="w-5 h-5 fill-current" />
+          ) : (
+            <Play className="w-5 h-5 fill-current ml-0.5" />
+          )}
         </button>
 
         <button
@@ -119,7 +132,12 @@ export const PlaybackBar: React.FC<PlaybackBarProps> = ({
       {/* Center: Reading Status & Progress */}
       <div className="flex-1 max-w-md flex flex-col items-center justify-center px-4">
         <div className="flex items-center space-x-2 text-xs mb-1">
-          {activeBlock ? (
+          {isBuffering ? (
+            <span className="text-sky-400 font-semibold animate-pulse flex items-center">
+              <Loader2 className="w-3 h-3 animate-spin mr-1" />
+              BUFFERING AUDIO...
+            </span>
+          ) : activeBlock ? (
             <>
               <span className="font-semibold text-sky-400 uppercase tracking-wide">
                 [{activeBlock.type}]
