@@ -75,8 +75,8 @@ StudyPDF_Reader/
 Clone the repository and install all workspace dependencies from the root directory:
 
 ```bash
-git clone https://github.com/your-username/StudyPDF_Reader.git
-cd StudyPDF_Reader
+git clone https://github.com/pingslayer/study-pdf-reader.git
+cd study-pdf-reader
 npm install
 ```
 
@@ -163,12 +163,13 @@ This compiles both the server TypeScript and the client Vite bundle into optimiz
 
 ## Automated Testing Suite
 
-The repository includes a comprehensive, 42-test automated suite covering layout analysis, study settings filtering, token alignment synchronization, and SSML sanitization:
+The repository includes a comprehensive, 54-test automated suite covering layout analysis, study settings filtering, token alignment synchronization, database persistence, and SSML sanitization:
 
 ```bash
 npm run test
 ```
 
+- **Library & Bookmarks Database Tests** (`database.test.ts`): Validates document insertions, last-read page tracking, bookmark management, and cascade deletions.
 - **Study Settings Filter Tests** (`studySettings.test.ts`): Proves complete independence of all 10 study settings toggles (page numbers, headers, footers, code skipping, captions, equations).
 - **Layout Engine Tests** (`layoutAnalysis.test.ts`): Validates heading detection, C program parsing, caption distinguishing vs. prose, and diagram arrows.
 - **Word-Level Highlighting Tests** (`textMapping.test.ts`): Validates priority matching, hyphenation resolution, and 1-to-1 SSML token alignment.
