@@ -18,7 +18,8 @@ db.exec(`
     filename TEXT NOT NULL,
     original_name TEXT NOT NULL,
     last_read_page INTEGER DEFAULT 1,
-    uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    file_size INTEGER DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS bookmarks (
@@ -30,5 +31,11 @@ db.exec(`
     FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE
   );
 `);
+
+try {
+  db.exec('ALTER TABLE documents ADD COLUMN file_size INTEGER DEFAULT 0');
+} catch {
+  // column already exists
+}
 
 export default db;

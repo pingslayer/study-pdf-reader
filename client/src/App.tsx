@@ -75,8 +75,32 @@ export const App: React.FC = () => {
     [activeDocument]
   );
 
-  // Page navigation
-  const handlePageChange = useCallback(
+  // Natural engine page progression (continues playback across pages)
+  const handleEnginePageChange = useCallback(
+    (page: number) => {
+      if (page >= 1 && page <= numPages) {
+        setCurrentPage(page);
+        syncProgress(page);
+      }
+    },
+    [numPages, syncProgress]
+  );
+
+  // Centralized Playback Engine (Strict FSM, Dual-Clock Sync, and Epoch Protection)
+  const playback = usePlaybackEngine({
+    readableBlocks,
+    currentPageLayout,
+    selectedVoice,
+    speed,
+    volume,
+    studySettings,
+    currentPage,
+    numPages,
+    onPageChange: handleEnginePageChange,
+  });
+
+  // Manual page navigation (Option A: stops playback, user presses Play to resume)
+  const handleManualPageChange = useCallback(
     (page: number) => {
       if (page >= 1 && page <= numPages) {
         playback.resetPlayback();
@@ -84,21 +108,8 @@ export const App: React.FC = () => {
         syncProgress(page);
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [numPages, syncProgress]
+    [numPages, syncProgress, playback]
   );
-
-  // Centralized Playback Engine (Strict FSM, Dual-Clock Sync, and Epoch Protection)
-  const playback = usePlaybackEngine({
-    readableBlocks,
-    selectedVoice,
-    speed,
-    volume,
-    studySettings,
-    currentPage,
-    numPages,
-    onPageChange: handlePageChange,
-  });
 
   // Check backend health & voices on mount
   useEffect(() => {
@@ -273,10 +284,10 @@ export const App: React.FC = () => {
         }
       } else if (e.code === 'ArrowLeft') {
         e.preventDefault();
-        handlePageChange(currentPage - 1);
+        handleManualPageChange(currentPage - 1);
       } else if (e.code === 'ArrowRight') {
         e.preventDefault();
-        handlePageChange(currentPage + 1);
+        handleManualPageChange(currentPage + 1);
       } else if (e.key === 'i' || e.key === 'I') {
         setInspectorMode((prev) => !prev);
       }
@@ -284,7 +295,7 @@ export const App: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [playback, handlePageChange, currentPage]);
+  }, [playback, handleManualPageChange, currentPage]);
 
   const currentBlockIndex = playback.activeBlock
     ? readableBlocks.findIndex((b) => b.id === playback.activeBlock?.id)
@@ -329,7 +340,7 @@ export const App: React.FC = () => {
         numPages={numPages}
         currentPage={currentPage}
         scale={scale}
-        onSelectPage={handlePageChange}
+        onSelectPage={handleManualPageChange}
         onScaleChange={setScale}
         onFitWidth={handleFitWidth}
         onFitPage={handleFitPage}

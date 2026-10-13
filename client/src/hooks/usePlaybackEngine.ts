@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { PDFBlock, StudySettings, BoundingBox } from '../types/pdf';
+import { PDFBlock, StudySettings, BoundingBox, PageLayoutData } from '../types/pdf';
 import { ttsPlayer, TTSClientResponse } from '../services/ttsClient';
 import {
   buildVisualTokensFromBlock,
@@ -30,6 +30,7 @@ export function getSpokenTextForBlock(
 
 export interface UsePlaybackEngineProps {
   readableBlocks: PDFBlock[];
+  currentPageLayout?: PageLayoutData | null;
   selectedVoice: string;
   speed: number;
   volume: number;
@@ -41,6 +42,7 @@ export interface UsePlaybackEngineProps {
 
 export function usePlaybackEngine({
   readableBlocks,
+  currentPageLayout,
   selectedVoice,
   speed,
   volume,
@@ -78,17 +80,31 @@ export function usePlaybackEngine({
   // Function ref handles to allow recursive advancement without circular closure dependencies
   const handleNextBlockRef = useRef<() => void>(() => {});
   const playBlockNarrationRef = useRef<(block: PDFBlock) => void>(() => {});
+  const stopRef = useRef<() => void>(() => {});
 
   // Flag to auto-continue playback when navigating to the next page naturally
   const autoPlayOnPageLoadRef = useRef<boolean>(false);
 
   // Auto-play next page when readableBlocks load if autoPlayOnPageLoadRef was set
   useEffect(() => {
-    if (autoPlayOnPageLoadRef.current && readableBlocks.length > 0) {
-      autoPlayOnPageLoadRef.current = false;
-      playBlockNarrationRef.current(readableBlocks[0]);
+    if (!autoPlayOnPageLoadRef.current) return;
+
+    const isLayoutForCurrentPage = currentPageLayout
+      ? currentPageLayout.pageNumber === currentPage
+      : readableBlocks.length > 0 && readableBlocks[0].page === currentPage;
+
+    if (isLayoutForCurrentPage) {
+      if (readableBlocks.length > 0) {
+        autoPlayOnPageLoadRef.current = false;
+        playBlockNarrationRef.current(readableBlocks[0]);
+      } else if (currentPage < numPages) {
+        onPageChange(currentPage + 1);
+      } else {
+        autoPlayOnPageLoadRef.current = false;
+        stopRef.current();
+      }
     }
-  }, [readableBlocks]);
+  }, [readableBlocks, currentPageLayout, currentPage, numPages, onPageChange]);
 
   // Prefetch initial block when page changes or voice changes
   useEffect(() => {
@@ -132,23 +148,10 @@ export function usePlaybackEngine({
       const blockWords = block.text.trim().split(/\s+/).filter(Boolean).length;
       const isShortBlock = blockWords < 12 || block.text.trim().length < 75;
 
-      // Word-Quota Adaptive Window: look ahead up to 3 blocks or 35 words
-      const TARGET_WORD_QUOTA = 35;
-      const MAX_PREFETCH_BLOCKS = 3;
+      // Prefetch all remaining blocks on the current page
       const readable = readableBlocksRef.current;
       const currIdx = readable.findIndex((b) => b.id === block.id);
-      const upcomingBlocks: PDFBlock[] = [];
-
-      if (currIdx >= 0) {
-        let accumulatedWords = 0;
-        for (let i = currIdx + 1; i < readable.length && upcomingBlocks.length < MAX_PREFETCH_BLOCKS; i++) {
-          const candidate = readable[i];
-          upcomingBlocks.push(candidate);
-          const wCount = candidate.text.trim().split(/\s+/).filter(Boolean).length;
-          accumulatedWords += wCount;
-          if (accumulatedWords >= TARGET_WORD_QUOTA) break;
-        }
-      }
+      const upcomingBlocks: PDFBlock[] = currIdx >= 0 ? readable.slice(currIdx + 1) : [];
 
       // Early Parallel Prefetch for short blocks (e.g. 5-word heading)
       if (isShortBlock && upcomingBlocks.length > 0) {
@@ -173,8 +176,8 @@ export function usePlaybackEngine({
         let ttsPromise = prefetchCacheRef.current.get(cacheKey);
         if (!ttsPromise) {
           ttsPromise = ttsPlayer.fetchTTS(spokenText, selectedVoice);
+          prefetchCacheRef.current.set(cacheKey, ttsPromise);
         }
-        prefetchCacheRef.current.delete(cacheKey);
 
         const ttsData = await ttsPromise;
 
@@ -189,7 +192,7 @@ export function usePlaybackEngine({
           lastMatchedTokenIndexRef.current = 0;
         }
 
-        // Fill remaining upcoming blocks in background cache
+        // Fill remaining upcoming blocks on current page in background cache
         if (upcomingBlocks.length > 0) {
           (async () => {
             for (const b of upcomingBlocks) {
@@ -204,11 +207,6 @@ export function usePlaybackEngine({
               try {
                 const nextPromise = ttsPlayer.fetchTTS(nextSpokenText, selectedVoice);
                 prefetchCacheRef.current.set(nextKey, nextPromise);
-
-                if (prefetchCacheRef.current.size > 15) {
-                  const firstKey = prefetchCacheRef.current.keys().next().value;
-                  if (firstKey) prefetchCacheRef.current.delete(firstKey);
-                }
 
                 await nextPromise;
               } catch (err) {
@@ -363,7 +361,11 @@ export function usePlaybackEngine({
     } else if (currentPage < numPages) {
       if (statusRef.current === 'playing' || statusRef.current === 'buffering') {
         autoPlayOnPageLoadRef.current = true;
+        setStatus('buffering');
+        setActiveBlock(null);
+        setActiveHighlight(null);
       }
+      prefetchCacheRef.current.clear();
       onPageChange(currentPage + 1);
     } else {
       stop();
@@ -437,6 +439,7 @@ export function usePlaybackEngine({
   // Keep refs updated for circular callbacks
   playBlockNarrationRef.current = playBlockNarration;
   handleNextBlockRef.current = nextBlock;
+  stopRef.current = stop;
 
   return {
     status,

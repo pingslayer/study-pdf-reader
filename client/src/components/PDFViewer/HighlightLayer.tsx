@@ -20,6 +20,25 @@ export const HighlightLayer: React.FC<HighlightLayerProps> = ({
 }) => {
   const highlightRef = useRef<HTMLDivElement>(null);
 
+  // Auto-scroll when active block changes
+  useEffect(() => {
+    if (!activeBlock || !scrollContainerRef.current) return;
+
+    const container = scrollContainerRef.current;
+    const blockTop = activeBlock.bbox.y * scale;
+    const blockBottom = (activeBlock.bbox.y + activeBlock.bbox.height) * scale;
+    const containerTop = container.scrollTop;
+    const containerBottom = containerTop + container.clientHeight;
+
+    // Scroll into view if block is outside viewport bounds
+    if (blockTop < containerTop + 60 || blockBottom > containerBottom - 60) {
+      container.scrollTo({
+        top: Math.max(0, blockTop - 120),
+        behavior: 'smooth',
+      });
+    }
+  }, [activeBlock, scale, scrollContainerRef]);
+
   // Auto-scroll when word highlight changes
   useEffect(() => {
     if (!activeHighlight || !scrollContainerRef.current) return;

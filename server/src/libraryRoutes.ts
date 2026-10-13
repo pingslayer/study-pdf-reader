@@ -26,8 +26,20 @@ const upload = multer({ storage });
 // Get all documents
 router.get('/', (req, res) => {
   try {
-    const docs = db.prepare('SELECT * FROM documents ORDER BY uploaded_at DESC').all();
-    res.json(docs);
+    const docs = db.prepare('SELECT * FROM documents ORDER BY uploaded_at DESC').all() as any[];
+    const enriched = docs.map((doc) => {
+      let fileSize = doc.file_size;
+      if (!fileSize || fileSize === 0) {
+        try {
+          const filePath = path.join(uploadDir, doc.filename);
+          if (fs.existsSync(filePath)) {
+            fileSize = fs.statSync(filePath).size;
+          }
+        } catch {}
+      }
+      return { ...doc, file_size: fileSize || 0 };
+    });
+    res.json(enriched);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -41,10 +53,32 @@ router.post('/upload', upload.single('file'), (req, res) => {
   
   try {
     const id = crypto.randomUUID();
-    const stmt = db.prepare('INSERT INTO documents (id, filename, original_name) VALUES (?, ?, ?)');
-    stmt.run(id, req.file.filename, req.file.originalname);
+    const fileSize = req.file.size || 0;
+    const stmt = db.prepare('INSERT INTO documents (id, filename, original_name, file_size) VALUES (?, ?, ?, ?)');
+    stmt.run(id, req.file.filename, req.file.originalname, fileSize);
     
-    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(id);
+    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(id) as any;
+    res.json({ ...doc, file_size: doc.file_size || fileSize });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Rename document
+router.patch('/:id', (req, res) => {
+  try {
+    const { original_name } = req.body;
+    if (!original_name || typeof original_name !== 'string' || !original_name.trim()) {
+      return res.status(400).json({ error: 'A valid document name is required' });
+    }
+    const cleanName = original_name.trim();
+    const finalName = cleanName.toLowerCase().endsWith('.pdf') ? cleanName : `${cleanName}.pdf`;
+    const stmt = db.prepare('UPDATE documents SET original_name = ? WHERE id = ?');
+    const result = stmt.run(finalName, req.params.id);
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
     res.json(doc);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
