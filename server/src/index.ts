@@ -5,8 +5,11 @@ import path from 'path';
 import fs from 'fs';
 import { TTSService } from './ttsService.js';
 import { EdgeTTSService } from './edgeTtsService.js';
+import { AzureSpeechService } from './azureSpeechService.js';
 
 dotenv.config();
+dotenv.config({ path: path.resolve(process.cwd(), 'server/.env') });
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -16,6 +19,7 @@ app.use(express.json({ limit: '10mb' }));
 
 const elevenLabsService = new TTSService();
 const edgeTtsService = new EdgeTTSService();
+const azureSpeechService = new AzureSpeechService();
 
 import libraryRoutes from './libraryRoutes.js';
 import bookmarkRoutes from './bookmarkRoutes.js';
@@ -23,14 +27,15 @@ import bookmarkRoutes from './bookmarkRoutes.js';
 app.use('/api/library', libraryRoutes);
 app.use('/api/bookmarks', bookmarkRoutes);
 
-// Default provider: Edge Neural TTS (Free, high-quality, unlimited with word timestamps)
-let activeProvider: 'edge' | 'elevenlabs' = 'edge';
+// Default provider: Azure Neural TTS if keys present, otherwise fallback to Edge or ElevenLabs
+let activeProvider: 'azure' | 'edge' | 'elevenlabs' = azureSpeechService.hasConfig() ? 'azure' : 'edge';
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     active_provider: activeProvider,
+    azure_configured: azureSpeechService.hasConfig(),
     elevenlabs_configured: elevenLabsService.hasApiKey(),
     timestamp: new Date().toISOString(),
   });
@@ -39,11 +44,11 @@ app.get('/api/health', (req, res) => {
 // Switch active TTS provider
 app.post('/api/config/provider', (req, res) => {
   const { provider } = req.body;
-  if (provider === 'elevenlabs' || provider === 'edge') {
+  if (provider === 'azure' || provider === 'elevenlabs' || provider === 'edge') {
     activeProvider = provider;
     res.json({ success: true, active_provider: activeProvider });
   } else {
-    res.status(400).json({ error: 'Provider must be "edge" or "elevenlabs"' });
+    res.status(400).json({ error: 'Provider must be "azure", "edge" or "elevenlabs"' });
   }
 });
 
@@ -116,7 +121,12 @@ app.get('/api/voices', async (req, res) => {
     return res.json({ voices: defaultVoices, provider: 'elevenlabs', hasCustomApiKey: true });
   }
 
-  // Default: Microsoft Edge Neural Voices (Free & Unlimited)
+  if (azureSpeechService.hasConfig()) {
+    const azureVoices = await azureSpeechService.getVoices();
+    return res.json({ voices: azureVoices, provider: 'azure' });
+  }
+
+  // Fallback: Microsoft Edge Neural Voices
   const edgeVoices = await edgeTtsService.getVoices();
   res.json({ voices: edgeVoices, provider: 'edge' });
 });
@@ -135,6 +145,9 @@ app.post('/api/tts', async (req, res) => {
     if (chosenProvider === 'elevenlabs') {
       const result = await elevenLabsService.generateSpeech(text.trim(), voiceId);
       res.json(result);
+    } else if (chosenProvider === 'azure' || (chosenProvider === 'edge' && azureSpeechService.hasConfig())) {
+      const result = await azureSpeechService.generateSpeech(text.trim(), voiceId);
+      res.json(result);
     } else {
       // Free Microsoft Edge Neural TTS with exact word-boundary timestamps
       const result = await edgeTtsService.generateSpeech(text.trim(), voiceId);
@@ -151,5 +164,6 @@ app.post('/api/tts', async (req, res) => {
 app.listen(port, () => {
   console.log(`StudyPDF Reader Server listening on http://localhost:${port}`);
   console.log(`Active TTS Provider: ${activeProvider.toUpperCase()} (Neural with Word Timestamps)`);
+  console.log(`Azure Speech Configured: ${azureSpeechService.hasConfig() ? 'YES (Active)' : 'NO'}`);
   console.log(`ElevenLabs Key Configured: ${elevenLabsService.hasApiKey() ? 'YES (standby)' : 'NO'}`);
 });

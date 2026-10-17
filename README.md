@@ -21,8 +21,9 @@ Unlike typical text-to-speech tools that strip away layout and dump text into a 
 - **Word-Level Synchronized TTS Highlighting**: Words on the PDF canvas light up in real-time in exact lockstep with spoken audio using sub-millisecond audio timestamps.
 - **Robust Playback Engine & Spam Protection**: Hardened against rapid user interactions (Prev/Next spam, pause during buffer) using monotonic playback generation tickets (`playbackEpochRef`), debounced buffering indicators, and clean prefetch cache isolation.
 - **Network Resilience & Circuit Breaker**: Gracefully handles network disconnects and offline mode with a non-intrusive error banner and one-click Retry button instead of silent skipping loops.
-- **Free Edge Neural TTS Out-of-the-Box**: Powered by Microsoft Edge Neural voices (no API keys, subscriptions, or credit cards required), with optional ElevenLabs integration for custom cloned voices. Adaptive streaming timeouts dynamically support full-length code listings (40s+ speech) without truncation.
+- **Free Edge Neural & Official Azure Speech Out-of-the-Box**: Powered by high-fidelity neural voices with sub-millisecond word boundaries. Supports **Microsoft Azure Speech Service** (via official SDK with sub-second latency and zero rate-limiting) and **Microsoft Edge Neural voices**, with optional **ElevenLabs** integration for cloned voices.
 - **Academic & Technical Layout Intelligence**:
+  - **LaTeX Small Caps & Multi-Item Word Coalescing**: Headings and titles in LaTeX documents (which PDF engines split into disparate glyph fragments like `[T]` and `[HE]`) are automatically coalesced into unified words with compound bounding boxes, preventing spelling out of titles.
   - **C / Monospace Code Listings**: Accurately distinguished from prose; reads either literally word-by-word with code highlights or summarized as code references. Preserves operators (`!=`, `->`, `<=`, etc.) with natural spoken translations.
   - **Running Headers & Footers**: Automatically identifies and filters out repetitive book titles, chapter banners, and page numbers so narration flows uninterrupted.
   - **Paragraph Segmentation**: Distinguishes distinct prose paragraphs using indentation and line-spacing heuristics rather than arbitrarily grouping whole pages.
@@ -50,23 +51,24 @@ StudyPDF_Reader/
 │   │   │   └── Controls/       # Study Settings & API Modals
 │   │   ├── services/
 │   │   │   ├── layoutAnalysis.ts # Heading, Code, Paragraph, Header/Footer heuristics
-│   │   │   ├── textMapping.ts    # Audio timestamp to PDF bounding-box mapping
+│   │   │   ├── textMapping.ts    # Small caps coalescing & word alignment mapping
 │   │   │   ├── pdfService.ts     # PDF.js document loader & page renderer
 │   │   │   └── ttsClient.ts      # Web Audio API streaming & alignment player
 │   │   └── types/pdf.ts          # Core geometry and block data models
 │   └── package.json
 ├── server/                     # Node.js + Express + SQLite + TypeScript
 │   ├── src/
-│   │   ├── ttsService.ts       # ElevenLabs Streaming API with alignment
-│   │   ├── edgeTtsService.ts   # Microsoft Edge Neural TTS with SSML timestamps
-│   │   ├── db.ts               # SQLite Database initialization & schema migrations
-│   │   ├── libraryRoutes.ts    # API for uploads, progress, renaming, and file sizes
-│   │   ├── bookmarkRoutes.ts   # API for managing document bookmarks
-│   │   └── index.ts            # REST API endpoints & voice discovery
-│   ├── uploads/                # Local persistent PDF file storage
-│   ├── db/                     # SQLite database (library.db)
+│   │   ├── azureSpeechService.ts # Microsoft Azure Speech SDK with WordBoundary events
+│   │   ├── edgeTtsService.ts     # Microsoft Edge Neural TTS fallback
+│   │   ├── ttsService.ts         # ElevenLabs Streaming API with alignment
+│   │   ├── db.ts                 # SQLite Database initialization & schema migrations
+│   │   ├── libraryRoutes.ts      # API for uploads, progress, renaming, and file sizes
+│   │   ├── bookmarkRoutes.ts     # API for managing document bookmarks
+│   │   └── index.ts              # REST API endpoints & voice discovery
+│   ├── uploads/                  # Local persistent PDF file storage
+│   ├── db/                       # SQLite database (library.db)
 │   └── package.json
-└── package.json                # Root workspace orchestration (concurrently)
+└── package.json                  # Root workspace orchestration (concurrently)
 ```
 
 ---
@@ -88,7 +90,26 @@ cd study-pdf-reader
 npm install
 ```
 
-### 2. Running in Development Mode
+### 2. Speech Synthesis Configuration
+
+The application supports three TTS engines:
+
+1. **Microsoft Azure Speech Service (Recommended)**:
+   Add your Azure Speech key and region to `server/.env`:
+   ```env
+   AZURE_SPEECH_KEY=your_azure_speech_key_here
+   AZURE_SPEECH_REGION=centralindia
+   PORT=3001
+   ```
+2. **Microsoft Edge Neural TTS (Free, Zero Configuration)**:
+   Works out of the box with natural neural voices if no Azure credentials are provided.
+3. **ElevenLabs (Optional Custom Voices)**:
+   ```env
+   ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
+   ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM
+   ```
+
+### 3. Running in Development Mode
 
 Start both the backend API and frontend dev server with a single command:
 
@@ -98,23 +119,6 @@ npm run dev
 
 - **Frontend**: [http://localhost:5173](http://localhost:5173)
 - **Backend API**: [http://localhost:3001](http://localhost:3001)
-
-### 3. Optional: ElevenLabs Integration
-
-By default, the app uses **Microsoft Edge Neural TTS**, which works instantly with high naturalness and zero configuration.
-
-If you also wish to use ElevenLabs:
-1. Copy `.env.example` in `server/`:
-   ```bash
-   cp server/.env.example server/.env
-   ```
-2. Add your API key and preferred Voice ID:
-   ```env
-   ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
-   ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM
-   PORT=3001
-   ```
-3. Alternatively, click the **Settings** icon inside the app to configure your API key at runtime.
 
 ---
 
@@ -176,18 +180,19 @@ This compiles both the server TypeScript and the client Vite bundle into optimiz
 
 ## Automated Testing Suite
 
-The repository includes a comprehensive, 66-test automated suite covering layout analysis, study settings filtering, token alignment synchronization, library utilities, database persistence, and SSML sanitization:
+The repository includes a comprehensive, 72-test automated suite covering layout analysis, study settings filtering, token alignment synchronization, small-caps coalescing, library utilities, database persistence, and Azure / Edge TTS synthesis:
 
 ```bash
 npm run test
 ```
 
+- **Azure Speech Service Tests** (`azureSpeech.test.ts`): Validates Azure SDK initialization, voice discovery, word boundary parsing, symbol sanitization without double-escaping, and empty block bypass.
+- **Edge Neural TTS Tests** (`edgeTts.test.ts`): Validates SSML XML entity escaping, arrow and inequality conversions, and fallback handling.
+- **Word-Level Highlighting & Alignment Tests** (`textMapping.test.ts`): Validates priority matching, hyphenation resolution, LaTeX small caps merging into compound tokens, and multi-item word alignment.
 - **Library Utilities & Search/Sort Engine Tests** (`libraryUtils.test.ts`): Validates title cleaning, byte/date formatting, search substring matching, status filtering, and multi-field sorting.
 - **Library & Bookmarks Database Tests** (`database.test.ts`): Validates document insertions, last-read page tracking, bookmark management, and cascade deletions.
 - **Study Settings Filter Tests** (`studySettings.test.ts`): Proves complete independence of all 10 study settings toggles (page numbers, headers, footers, code skipping, captions, equations).
 - **Layout Engine Tests** (`layoutAnalysis.test.ts`): Validates heading detection, C program parsing, caption distinguishing vs. prose, and diagram arrows.
-- **Word-Level Highlighting Tests** (`textMapping.test.ts`): Validates priority matching, hyphenation resolution, and 1-to-1 SSML token alignment.
-- **Backend SSML & Synthesis Tests** (`edgeTts.test.ts`): Validates XML entity safety, mathematical arrow and inequality conversion, and empty/symbol block handling.
 
 ---
 

@@ -132,6 +132,7 @@ export function buildVisualTokensFromBlock(block: PDFBlock): VisualToken[] {
     const scaleFactor = item.width / totalMeasuredWidth;
 
     let currentX = item.x;
+    let tokensInItem = 0;
 
     for (const mt of measuredTokens) {
       const scaledWidth = mt.width * scaleFactor;
@@ -154,15 +155,49 @@ export function buildVisualTokensFromBlock(block: PDFBlock): VisualToken[] {
             height: Math.round(item.height * 10) / 10,
           };
 
-          tokens.push({
-            word: wordText,
-            normalized: normalizeWord(wordText),   // strips trailing '-' for matching
-            itemIndices: [i],
-            charStart: runningCharOffset,
-            charEnd: runningCharOffset + wordText.length,
-            bbox: box,
-            subBoxes: [box],
-          });
+          const prev = tokens.length > 0 ? tokens[tokens.length - 1] : null;
+          const prevItem = i > 0 ? items[i - 1] : null;
+          const isContinuation =
+            tokensInItem === 0 &&
+            i > 0 &&
+            prev !== null &&
+            prevItem !== null &&
+            prev.itemIndices.includes(i - 1) &&
+            Math.abs(item.y - prevItem.y) <= 4 &&
+            item.x - (prevItem.x + prevItem.width) <= 0.8 &&
+            !prevItem.text.endsWith(' ') &&
+            !item.text.startsWith(' ');
+
+          if (isContinuation && prev) {
+            prev.word += wordText;
+            prev.normalized = normalizeWord(prev.word);
+            if (!prev.itemIndices.includes(i)) {
+              prev.itemIndices.push(i);
+            }
+            prev.charEnd = runningCharOffset + wordText.length;
+            prev.subBoxes.push(box);
+            const minX = Math.min(prev.bbox.x, box.x);
+            const minY = Math.min(prev.bbox.y, box.y);
+            const maxX = Math.max(prev.bbox.x + prev.bbox.width, box.x + box.width);
+            const maxY = Math.max(prev.bbox.y + prev.bbox.height, box.y + box.height);
+            prev.bbox = {
+              x: Math.round(minX * 10) / 10,
+              y: Math.round(minY * 10) / 10,
+              width: Math.round((maxX - minX) * 10) / 10,
+              height: Math.round((maxY - minY) * 10) / 10,
+            };
+          } else {
+            tokens.push({
+              word: wordText,
+              normalized: normalizeWord(wordText),   // strips trailing '-' for matching
+              itemIndices: [i],
+              charStart: runningCharOffset,
+              charEnd: runningCharOffset + wordText.length,
+              bbox: box,
+              subBoxes: [box],
+            });
+          }
+          tokensInItem++;
         }
 
         runningCharOffset += wordText.length;
@@ -173,9 +208,19 @@ export function buildVisualTokensFromBlock(block: PDFBlock): VisualToken[] {
       currentX += scaledWidth;
     }
 
-    // Account for the newline character ('\n') joined between items in block.text
+    // Account for inter-item spaces / newlines consistent with layoutAnalysis
     if (i < items.length - 1) {
-      runningCharOffset += 1;
+      const nextItem = items[i + 1];
+      const isNewLine = Math.abs(nextItem.y - item.y) > 4;
+      if (isNewLine) {
+        runningCharOffset += 1;
+      } else {
+        const gap = nextItem.x - (item.x + item.width);
+        const hadSpace = item.text.endsWith(' ') || nextItem.text.startsWith(' ');
+        if (!hadSpace && gap > 0.8) {
+          runningCharOffset += 1;
+        }
+      }
     }
   }
 
@@ -210,6 +255,7 @@ export function buildVisualTokensFromAlignment(
     // Strip surrounding punctuation for searching in PDF items (e.g. '<stdio.h>' or 'argc,')
     const cleanWord = rawWord.replace(/^[^a-zA-Z0-9#*+<]+|[^a-zA-Z0-9#*+>]+$/gu, '');
     const searchWord = cleanWord.length > 0 ? cleanWord : rawWord;
+    const searchWordLower = searchWord.toLowerCase();
 
     let matched = false;
 
@@ -218,7 +264,8 @@ export function buildVisualTokensFromAlignment(
       const item = items[i];
       const startSearch = i === currentItemIdx ? charOffsetInItem : 0;
       
-      const foundIdx = item.text.toLowerCase().indexOf(searchWord.toLowerCase(), startSearch);
+      // 1. Direct single-item match
+      const foundIdx = item.text.toLowerCase().indexOf(searchWordLower, startSearch);
       if (foundIdx !== -1) {
         const totalMeasured = getTextWidth(item.text, item.fontSize, item.isMonospace) || 1;
         const scaleFactor = item.width / totalMeasured;
@@ -250,6 +297,94 @@ export function buildVisualTokensFromAlignment(
         runningCharOffset += rawWord.length + 1;
         matched = true;
         break;
+      }
+
+      // 2. Multi-item match (e.g. LaTeX small caps "[T]" + "[HE]" or hyphenation "[in-]" + "[structions]")
+      const firstCharIdx = item.text.toLowerCase().indexOf(searchWordLower[0], startSearch);
+      if (firstCharIdx !== -1) {
+        const part1 = item.text.slice(firstCharIdx);
+        const isHyphen = part1.endsWith('-');
+        const part1Clean = isHyphen ? part1.slice(0, -1) : part1;
+
+        if (part1Clean.length > 0 && searchWordLower.startsWith(part1Clean.toLowerCase())) {
+          let needed = searchWordLower.slice(part1Clean.length);
+          const spanItems: Array<{ itemIdx: number; start: number; end: number }> = [
+            { itemIdx: i, start: firstCharIdx, end: item.text.length },
+          ];
+          let currIdx = i;
+
+          while (needed.length > 0 && currIdx + 1 < items.length) {
+            const prevIt = items[currIdx];
+            const nextIt = items[currIdx + 1];
+
+            const sameLine = Math.abs(nextIt.y - prevIt.y) <= 4;
+            const gap = nextIt.x - (prevIt.x + prevIt.width);
+            const isContinuation =
+              (sameLine && gap <= 0.8 && !prevIt.text.endsWith(' ') && !nextIt.text.startsWith(' ')) ||
+              (!sameLine && prevIt.text.trim().endsWith('-'));
+
+            if (!isContinuation) break;
+
+            const takeLen = Math.min(needed.length, nextIt.text.trim().length);
+            const nextSlice = nextIt.text.slice(0, takeLen);
+            if (nextSlice.toLowerCase() === needed.slice(0, takeLen)) {
+              spanItems.push({ itemIdx: currIdx + 1, start: 0, end: takeLen });
+              needed = needed.slice(takeLen);
+              currIdx++;
+            } else {
+              break;
+            }
+          }
+
+          if (needed.length === 0) {
+            const subBoxes: BoundingBox[] = [];
+            for (const span of spanItems) {
+              const it = items[span.itemIdx];
+              const totalMeasured = getTextWidth(it.text, it.fontSize, it.isMonospace) || 1;
+              const scaleFactor = it.width / totalMeasured;
+              const prefix = it.text.slice(0, span.start);
+              const prefixWidth = getTextWidth(prefix, it.fontSize, it.isMonospace) * scaleFactor;
+              const slice = it.text.slice(span.start, span.end);
+              const sliceWidth = Math.max(4, getTextWidth(slice, it.fontSize, it.isMonospace) * scaleFactor);
+
+              subBoxes.push({
+                x: Math.round((it.x + prefixWidth) * 10) / 10,
+                y: Math.round(it.y * 10) / 10,
+                width: Math.round(sliceWidth * 10) / 10,
+                height: Math.round(it.height * 10) / 10,
+              });
+            }
+
+            const minX = Math.min(...subBoxes.map(b => b.x));
+            const minY = Math.min(...subBoxes.map(b => b.y));
+            const maxX = Math.max(...subBoxes.map(b => b.x + b.width));
+            const maxY = Math.max(...subBoxes.map(b => b.y + b.height));
+
+            const unionBox: BoundingBox = {
+              x: Math.round(minX * 10) / 10,
+              y: Math.round(minY * 10) / 10,
+              width: Math.max(6, Math.round((maxX - minX) * 10) / 10),
+              height: Math.round((maxY - minY) * 10) / 10,
+            };
+
+            tokens.push({
+              word: rawWord,
+              normalized: normalizeWord(rawWord),
+              itemIndices: spanItems.map(s => s.itemIdx),
+              charStart: runningCharOffset,
+              charEnd: runningCharOffset + rawWord.length,
+              bbox: unionBox,
+              subBoxes,
+            });
+
+            const lastSpan = spanItems[spanItems.length - 1];
+            currentItemIdx = lastSpan.itemIdx;
+            charOffsetInItem = lastSpan.end;
+            runningCharOffset += rawWord.length + 1;
+            matched = true;
+            break;
+          }
+        }
       }
     }
 

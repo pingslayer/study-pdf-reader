@@ -94,6 +94,31 @@ describe('Word Highlighting & Alignment Mapping Engine (Unit Tests)', () => {
       assert.equal(tokens[0].subBoxes[0].y, 100);
       assert.equal(tokens[0].subBoxes[1].y, 115);
     });
+
+    it('merges LaTeX small caps items into single tokens with subBoxes', () => {
+      const mockBlock: PDFBlock = {
+        id: 'p1-b-title',
+        page: 1,
+        type: 'heading',
+        text: 'THE ABSTRACTION',
+        items: [
+          createMockItem({ text: 'T', x: 50, y: 100, width: 10, height: 16, fontSize: 14 }),
+          createMockItem({ text: 'HE', x: 60.2, y: 100, width: 20, height: 16, fontSize: 11 }),
+          createMockItem({ text: 'A', x: 88, y: 100, width: 11, height: 16, fontSize: 14 }),
+          createMockItem({ text: 'BSTRACTION', x: 99.2, y: 100, width: 80, height: 16, fontSize: 11 }),
+        ],
+        bbox: { x: 50, y: 100, width: 130, height: 16 },
+        readingOrderIndex: 0,
+        isFiltered: false,
+      };
+
+      const tokens = buildVisualTokensFromBlock(mockBlock);
+      assert.equal(tokens.length, 2);
+      assert.equal(tokens[0].word, 'THE');
+      assert.equal(tokens[0].subBoxes.length, 2);
+      assert.equal(tokens[1].word, 'ABSTRACTION');
+      assert.equal(tokens[1].subBoxes.length, 2);
+    });
   });
 
   describe('buildVisualTokensFromAlignment', () => {
@@ -129,6 +154,46 @@ describe('Word Highlighting & Alignment Mapping Engine (Unit Tests)', () => {
       // Verify that coordinates advance downwards
       assert.equal(tokens[0].bbox.y, 100);
       assert.equal(tokens[2].bbox.y, 115);
+    });
+
+    it('maps TTS alignment words across LaTeX small caps multi-item tokens', () => {
+      const mockBlock: PDFBlock = {
+        id: 'p1-b-title',
+        page: 1,
+        type: 'heading',
+        text: 'THE ABSTRACTION: THE PROCESS',
+        items: [
+          createMockItem({ text: 'T', x: 50, y: 100, width: 10, height: 16, fontSize: 14 }),
+          createMockItem({ text: 'HE', x: 60.2, y: 100, width: 20, height: 16, fontSize: 11 }),
+          createMockItem({ text: 'A', x: 88, y: 100, width: 11, height: 16, fontSize: 14 }),
+          createMockItem({ text: 'BSTRACTION', x: 99.2, y: 100, width: 80, height: 16, fontSize: 11 }),
+          createMockItem({ text: ': ', x: 180, y: 100, width: 8, height: 16, fontSize: 14 }),
+          createMockItem({ text: 'T', x: 195, y: 100, width: 10, height: 16, fontSize: 14 }),
+          createMockItem({ text: 'HE', x: 205.2, y: 100, width: 20, height: 16, fontSize: 11 }),
+          createMockItem({ text: 'P', x: 233, y: 100, width: 10, height: 16, fontSize: 14 }),
+          createMockItem({ text: 'ROCESS', x: 243.2, y: 100, width: 60, height: 16, fontSize: 11 }),
+        ],
+        bbox: { x: 50, y: 100, width: 254, height: 16 },
+        readingOrderIndex: 0,
+        isFiltered: false,
+      };
+
+      const mockAlignment: WordAlignment[] = [
+        { word: 'THE', start: 0, end: 200 },
+        { word: 'ABSTRACTION', start: 210, end: 700 },
+        { word: 'THE', start: 710, end: 900 },
+        { word: 'PROCESS', start: 910, end: 1400 },
+      ];
+
+      const tokens = buildVisualTokensFromAlignment(mockBlock, mockAlignment);
+      assert.equal(tokens.length, 4);
+      assert.equal(tokens[0].word, 'THE');
+      assert.equal(tokens[0].subBoxes.length, 2);
+      assert.equal(tokens[1].word, 'ABSTRACTION');
+      assert.equal(tokens[1].subBoxes.length, 2);
+      assert.equal(tokens[2].word, 'THE');
+      assert.equal(tokens[3].word, 'PROCESS');
+      assert.equal(tokens[3].subBoxes.length, 2);
     });
   });
 

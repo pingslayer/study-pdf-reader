@@ -13,7 +13,7 @@ export type PlaybackStatus = 'idle' | 'buffering' | 'playing' | 'paused' | 'erro
 export function getSpokenTextForBlock(
   block: PDFBlock,
   settings: StudySettings,
-  visualTokens?: VisualToken[]
+  _visualTokens?: VisualToken[]
 ): string {
   if (block.type === 'code') {
     if (settings.readCodeLiterally) {
@@ -21,9 +21,6 @@ export function getSpokenTextForBlock(
     } else {
       return 'Code example. ' + (block.languageHint ? `${block.languageHint} code.` : '');
     }
-  }
-  if (visualTokens && visualTokens.length > 0) {
-    return visualTokens.map((vt) => vt.word).join(' ');
   }
   return block.text.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
 }
